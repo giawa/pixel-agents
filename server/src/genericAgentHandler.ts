@@ -105,6 +105,8 @@ export class GenericAgentHandler {
       folderName: event.agentName,
       inputTokens: 0,
       outputTokens: 0,
+      palette: event.palette,
+      hueShift: event.hueShift,
     };
 
     this.store.set(internalId, agent);
