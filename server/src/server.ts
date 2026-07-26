@@ -75,6 +75,7 @@ export class PixelAgentsServer {
     embedded?: boolean;
     host?: string;
     port?: number;
+    token?: string;
     staticDir?: string;
     assetCache?: AssetCache;
     onSetHooksEnabled?: SetHooksEnabledSideEffect;
@@ -101,7 +102,7 @@ export class PixelAgentsServer {
     }
 
     // Start our own server
-    const token = crypto.randomUUID();
+    const token = options?.token ?? crypto.randomUUID();
     const store = options?.store;
 
     const { app, port } = await createHttpServer({
