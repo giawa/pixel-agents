@@ -22,6 +22,7 @@ import type { AssetCache, ReloadAssetsSideEffect } from './clientMessageHandler.
 import { readConfig } from './configPersistence.js';
 import { MAX_PORT, MIN_PORT } from './constants.js';
 import { FileStateAdapter } from './fileStateAdapter.js';
+import { GenericAgentHandler } from './genericAgentHandler.js';
 import { claudeProvider, copyHookScript } from './providers/index.js';
 import { PixelAgentsServer } from './server.js';
 
@@ -117,9 +118,17 @@ async function main(): Promise<void> {
     // Create runtime first (before server.start, so we can pass it in)
     const runtime = new AgentRuntime(store, claudeProvider);
 
+    // Create generic agent handler for the Generic Agent API
+    const genericHandler = new GenericAgentHandler(store, runtime);
+
     // Wire hook events: HTTP POST -> runtime -> hookEventHandler -> agents
     server.onHookEvent((providerId, event) => {
       runtime.handleHookEvent(providerId, event);
+    });
+
+    // Wire generic agent events: HTTP POST -> genericHandler -> agents
+    server.onGenericAgentEvent((agentId, event) => {
+      genericHandler.handleEvent(agentId, event);
     });
 
     // onSetHooksEnabled side effect: install/uninstall hooks when user toggles in UI.
@@ -221,6 +230,7 @@ async function main(): Promise<void> {
     // ── Graceful shutdown ──
     function shutdown(): void {
       console.log('\nShutting down...');
+      genericHandler.dispose();
       runtime.dispose();
       server.stop();
       process.exit(0);

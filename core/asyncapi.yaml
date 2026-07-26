@@ -19,6 +19,17 @@ info:
     The protocol is provider-agnostic: a HookProvider implementation defines how raw
     CLI events are normalized to the AgentEvent shape, which the server translates
     into ServerMessage broadcasts.
+
+    ## Generic Agent API
+
+    In addition to the WebSocket protocol, the server exposes a REST API for external
+    tools to drive the visualization directly. Any tool can create agents, report tool
+    activity, and manage agent lifecycle by sending canonical events to:
+
+    `POST /api/agents/:agentId/events`
+
+    Events: `sessionStart`, `sessionEnd`, `toolStart`, `toolEnd`, `turnEnd`, `permissionRequest`.
+    Authentication: Bearer token from `~/.pixel-agents/server.json`.
   license:
     name: MIT
   contact:

@@ -138,3 +138,87 @@ Content-Type: application/json
   "source": "clear",
   "cwd": "{{cwd}}"
 }
+
+###
+# ──────────────────────────────────────────────────────────────
+# Generic Agent API
+# ──────────────────────────────────────────────────────────────
+# The Generic Agent API allows any tool to drive the Pixel Agents
+# visualization by sending canonical events directly, without going
+# through provider-specific normalization.
+#
+# Usage:
+# 1. Start the server (npx pixel-agents or VS Code extension)
+# 2. Copy `port` and `token` from `~/.pixel-agents/server.json`
+# 3. Use your own agent ID (e.g., "my-tool-agent")
+# 4. Send events to create, update, and remove agents
+
+@genericAgentId = my-tool-agent
+
+###
+# Create a new agent (sessionStart)
+POST http://{{host}}:{{port}}/api/agents/{{genericAgentId}}/events
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{
+  "kind": "sessionStart",
+  "agentName": "My Custom Tool",
+  "cwd": "{{cwd}}"
+}
+
+###
+# Start a tool (toolStart)
+POST http://{{host}}:{{port}}/api/agents/{{genericAgentId}}/events
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{
+  "kind": "toolStart",
+  "toolId": "tool-1",
+  "toolName": "Build",
+  "status": "Compiling..."
+}
+
+###
+# Finish a tool (toolEnd)
+POST http://{{host}}:{{port}}/api/agents/{{genericAgentId}}/events
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{
+  "kind": "toolEnd",
+  "toolId": "tool-1"
+}
+
+###
+# Request permission (permissionRequest)
+POST http://{{host}}:{{port}}/api/agents/{{genericAgentId}}/events
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{
+  "kind": "permissionRequest"
+}
+
+###
+# End turn (turnEnd) - marks agent as waiting
+POST http://{{host}}:{{port}}/api/agents/{{genericAgentId}}/events
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{
+  "kind": "turnEnd",
+  "awaitingInput": true
+}
+
+###
+# Remove agent (sessionEnd)
+POST http://{{host}}:{{port}}/api/agents/{{genericAgentId}}/events
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{
+  "kind": "sessionEnd",
+  "reason": "done"
+}
