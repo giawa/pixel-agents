@@ -58,6 +58,12 @@ export interface AgentState {
   leadAgentId?: number;
   /** True when lead spawns teammates via tmux (run_in_background Agent calls) */
   teamUsesTmux?: boolean;
+
+  // -- Avatar customization --
+  /** Preferred character palette (0-5). If undefined, auto-assigned for diversity. */
+  palette?: number;
+  /** Hue shift in degrees (0-360). Rotates the base palette colors. */
+  hueShift?: number;
 }
 
 export interface PersistedAgent {

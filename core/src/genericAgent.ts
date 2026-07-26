@@ -21,6 +21,10 @@ export interface GenericSessionStart {
   agentName?: string;
   /** Working directory context (used for folder name). */
   cwd?: string;
+  /** Preferred character palette (0-5). If undefined, auto-assigned for diversity. */
+  palette?: number;
+  /** Hue shift in degrees (0-360). Rotates the base palette colors. */
+  hueShift?: number;
 }
 
 export interface GenericSessionEnd {
