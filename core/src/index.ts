@@ -10,6 +10,15 @@ export {
   SERVER_JSON_NAME,
   TASK_DESCRIPTION_DISPLAY_MAX_LENGTH,
 } from './constants.js';
+export type {
+  GenericAgentEvent,
+  GenericPermissionRequest,
+  GenericSessionEnd,
+  GenericSessionStart,
+  GenericToolEnd,
+  GenericToolStart,
+  GenericTurnEnd,
+} from './genericAgent.js';
 export type { ClientMessage, FurnitureAssetMessage, ServerMessage } from './messages.js';
 export type { AgentEvent, HookProvider } from './provider.js';
 export type {

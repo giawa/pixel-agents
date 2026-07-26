@@ -5,6 +5,7 @@ import * as crypto from 'crypto';
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import Fastify from 'fastify';
 
+import type { GenericAgentEvent } from '../../core/src/genericAgent.js';
 import type { AgentRuntime } from './agentRuntime.js';
 import type { AgentStateStore } from './agentStateStore.js';
 import type {
@@ -36,6 +37,8 @@ export interface HttpServerOptions {
   assetCache?: AssetCache;
   /** Callback when a hook event is received */
   onHookEvent?: (providerId: string, event: Record<string, unknown>) => void;
+  /** Callback when a generic agent event is received */
+  onGenericAgentEvent?: (agentId: string, event: GenericAgentEvent) => void;
   /** Invoked when setHooksEnabled is toggled via WebSocket. Standalone installs/uninstalls hooks here. */
   onSetHooksEnabled?: SetHooksEnabledSideEffect;
   /** Invoked when an external asset directory is added/removed. Standalone reloads + re-broadcasts assets here. */
@@ -81,6 +84,7 @@ export async function createHttpServer(options: HttpServerOptions): Promise<Http
 
   registerHealthRoute(app);
   registerHookRoute(app, options);
+  registerGenericAgentRoute(app, options);
   registerWebSocketRoute(app, options);
 
   // ── Listen ──────────────────────────────────────────────────
@@ -131,6 +135,39 @@ function registerHookRoute(app: FastifyInstance, options: HttpServerOptions): vo
       }
 
       reply.send('ok');
+    },
+  );
+}
+
+// ── Generic Agent Events ───────────────────────────────────────
+
+function registerGenericAgentRoute(app: FastifyInstance, options: HttpServerOptions): void {
+  app.post<{
+    Params: { agentId: string };
+    Body: GenericAgentEvent;
+  }>(
+    '/api/agents/:agentId/events',
+    {
+      preHandler: bearerAuth(options.token),
+      schema: {
+        params: {
+          type: 'object',
+          properties: {
+            agentId: { type: 'string', pattern: '^[a-zA-Z0-9_-]+$' },
+          },
+          required: ['agentId'],
+        },
+      },
+    },
+    async (request, reply) => {
+      const { agentId } = request.params;
+      const event = request.body;
+
+      if (event && typeof event === 'object' && 'kind' in event) {
+        options.onGenericAgentEvent?.(agentId, event);
+      }
+
+      reply.send({ ok: true });
     },
   );
 }

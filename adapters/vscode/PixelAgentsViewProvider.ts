@@ -27,6 +27,7 @@ import {
 import { loadAllCharacters, loadAllFurniture, loadAllPets } from '../../server/src/assetReload.js';
 import { readConfig, writeConfig } from '../../server/src/configPersistence.js';
 import { setFolderNameResolver, setTerminalAdapter } from '../../server/src/fileWatcher.js';
+import { GenericAgentHandler } from '../../server/src/genericAgentHandler.js';
 import type { LayoutWatcher } from '../../server/src/layoutPersistence.js';
 import {
   readLayoutFromFile,
@@ -92,6 +93,7 @@ export class PixelAgentsViewProvider implements vscode.WebviewViewProvider {
 
   // Pixel Agents Server (hook event reception)
   private pixelAgentsServer: PixelAgentsServer | null = null;
+  private genericAgentHandler: GenericAgentHandler | null = null;
   private adapter: StateAdapter;
 
   // Auto-spawn guard: ensures the startup spawn fires at most once per VS Code
@@ -197,6 +199,12 @@ export class PixelAgentsViewProvider implements vscode.WebviewViewProvider {
     this.pixelAgentsServer = new PixelAgentsServer();
     this.pixelAgentsServer.onHookEvent((providerId, event) => {
       this.runtime.handleHookEvent(providerId, event);
+    });
+
+    // Create generic agent handler for the Generic Agent API
+    this.genericAgentHandler = new GenericAgentHandler(this.store, this.runtime);
+    this.pixelAgentsServer.onGenericAgentEvent((agentId, event) => {
+      this.genericAgentHandler!.handleEvent(agentId, event);
     });
 
     this.pixelAgentsServer
@@ -814,6 +822,8 @@ export class PixelAgentsViewProvider implements vscode.WebviewViewProvider {
   dispose() {
     this.pixelAgentsServer?.stop();
     this.pixelAgentsServer = null;
+    this.genericAgentHandler?.dispose();
+    this.genericAgentHandler = null;
     this.runtime.dispose();
     this.layoutWatcher?.dispose();
     this.layoutWatcher = null;

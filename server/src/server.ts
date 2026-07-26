@@ -4,6 +4,7 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 
+import type { GenericAgentEvent } from '../../core/src/genericAgent.js';
 import type { AgentRuntime } from './agentRuntime.js';
 import type { AgentStateStore } from './agentStateStore.js';
 import type {
@@ -25,6 +26,9 @@ export type { ServerConfig } from './serverConfig.js';
 
 /** Callback invoked when a hook event is received from a provider's hook script. */
 type HookEventCallback = (providerId: string, event: Record<string, unknown>) => void;
+
+/** Callback invoked when a generic agent event is received. */
+type GenericAgentEventCallback = (agentId: string, event: GenericAgentEvent) => void;
 
 /**
  * Pixel Agents server: receives hook events, broadcasts state via WebSocket,
@@ -49,10 +53,16 @@ export class PixelAgentsServer {
   private config: ServerConfig | null = null;
   private ownsServer = false;
   private callback: HookEventCallback | null = null;
+  private genericAgentCallback: GenericAgentEventCallback | null = null;
 
   /** Register a callback for incoming hook events from any provider. */
   onHookEvent(callback: HookEventCallback): void {
     this.callback = callback;
+  }
+
+  /** Register a callback for incoming generic agent events. */
+  onGenericAgentEvent(callback: GenericAgentEventCallback): void {
+    this.genericAgentCallback = callback;
   }
 
   /**
@@ -104,6 +114,7 @@ export class PixelAgentsServer {
       staticDir: options?.staticDir,
       assetCache: options?.assetCache,
       onHookEvent: (providerId, event) => this.callback?.(providerId, event),
+      onGenericAgentEvent: (agentId, event) => this.genericAgentCallback?.(agentId, event),
       onSetHooksEnabled: options?.onSetHooksEnabled,
       onReloadAssets: options?.onReloadAssets,
     });
