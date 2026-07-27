@@ -13,6 +13,7 @@ interface BottomToolbarProps {
   isSettingsOpen: boolean;
   onToggleSettings: () => void;
   workspaceFolders: WorkspaceFolder[];
+  readOnly?: boolean;
 }
 
 export function BottomToolbar({
@@ -22,6 +23,7 @@ export function BottomToolbar({
   isSettingsOpen,
   onToggleSettings,
   workspaceFolders,
+  readOnly,
 }: BottomToolbarProps) {
   const [isFolderPickerOpen, setIsFolderPickerOpen] = useState(false);
   const [isBypassMenuOpen, setIsBypassMenuOpen] = useState(false);
@@ -121,9 +123,9 @@ export function BottomToolbar({
         </div>
       )}
       <Button
-        variant={isEditMode ? 'active' : 'default'}
-        onClick={onToggleEditMode}
-        title="Edit office layout"
+        variant={readOnly ? 'disabled' : isEditMode ? 'active' : 'default'}
+        onClick={readOnly ? undefined : onToggleEditMode}
+        title={readOnly ? 'View-only mode (connect from localhost to edit)' : 'Edit office layout'}
       >
         Layout
       </Button>

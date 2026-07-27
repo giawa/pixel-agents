@@ -45,6 +45,8 @@ interface OfficeCanvasProps {
   showAreas: boolean;
   /** Currently-selected area label in the editor (alpha-bumped overlay). null otherwise. */
   activeAreaLabel: string | null;
+  /** True when the client is remote; seat reassignment is disabled. */
+  readOnly?: boolean;
 }
 
 export function OfficeCanvas({
@@ -64,6 +66,7 @@ export function OfficeCanvas({
   panRef,
   showAreas,
   activeAreaLabel,
+  readOnly,
 }: OfficeCanvasProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -748,8 +751,10 @@ export function OfficeCanvas({
       // No agent hit — check seat click while agent is selected
       if (officeState.selectedAgentId !== null) {
         const selectedCh = officeState.characters.get(officeState.selectedAgentId);
-        // Skip seat reassignment for sub-agents
-        if (selectedCh && !selectedCh.isSubagent) {
+        // Skip seat reassignment for sub-agents and for read-only (remote)
+        // clients: reassignSeat mutates local state and saveAgentSeats is
+        // rejected server-side, so allowing it would desync on reload.
+        if (selectedCh && !selectedCh.isSubagent && !readOnly) {
           const tile = screenToTile(e.clientX, e.clientY);
           if (tile) {
             const seatId = officeState.getSeatAtTile(tile.col, tile.row);
@@ -792,7 +797,7 @@ export function OfficeCanvas({
         officeState.cameraFollowId = null;
       }
     },
-    [officeState, onClick, screenToWorld, screenToTile, isEditMode],
+    [officeState, onClick, screenToWorld, screenToTile, isEditMode, readOnly],
   );
 
   const handleMouseLeave = useCallback(() => {

@@ -267,6 +267,7 @@ export interface SettingsLoaded {
   hooksInfoShown: boolean;
   externalAssetDirectories: string[];
   showAreas: boolean;
+  readOnly?: boolean;
 }
 
 export interface ExternalAssetDirectoriesUpdated {

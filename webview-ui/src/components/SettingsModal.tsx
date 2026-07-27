@@ -29,6 +29,8 @@ interface SettingsModalProps {
   onExportLayout: () => void;
   /** Browser-native layout import from a chosen file (standalone only). */
   onImportLayout: (file: File) => void;
+  /** True when the client is remote; all mutations are disabled. */
+  readOnly?: boolean;
 }
 
 export function SettingsModal({
@@ -48,6 +50,7 @@ export function SettingsModal({
   showAreasAvailable,
   onExportLayout,
   onImportLayout,
+  readOnly,
 }: SettingsModalProps) {
   const [soundLocal, setSoundLocal] = useState(isSoundEnabled);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -55,39 +58,59 @@ export function SettingsModal({
 
   return (
     <Modal isOpen={isOpen} onClose={onClose} title="Settings">
+      {readOnly && (
+        <div className="mx-10 mt-6 mb-2 py-2 px-4 bg-warning/10 border-2 border-warning text-warning text-xs text-center">
+          View-only mode — connect from localhost to make changes
+        </div>
+      )}
       {/* Open Sessions Folder opens an OS file manager — impossible in the browser. */}
       {!isBrowserRuntime && (
         <MenuItem
-          onClick={() => {
-            transport.send({ type: 'openSessionsFolder' });
-            onClose();
-          }}
+          onClick={
+            readOnly
+              ? undefined
+              : () => {
+                  transport.send({ type: 'openSessionsFolder' });
+                  onClose();
+                }
+          }
+          disabled={readOnly}
         >
           Open Sessions Folder
         </MenuItem>
       )}
       <MenuItem
-        onClick={() => {
-          if (isBrowserRuntime) {
-            onExportLayout();
-          } else {
-            transport.send({ type: 'exportLayout' });
-          }
-          onClose();
-        }}
+        onClick={
+          readOnly
+            ? undefined
+            : () => {
+                if (isBrowserRuntime) {
+                  onExportLayout();
+                } else {
+                  transport.send({ type: 'exportLayout' });
+                }
+                onClose();
+              }
+        }
+        disabled={readOnly}
       >
         Export Layout
       </MenuItem>
       <MenuItem
-        onClick={() => {
-          if (isBrowserRuntime) {
-            // Open the native file picker; the import is applied in onChange below.
-            fileInputRef.current?.click();
-          } else {
-            transport.send({ type: 'importLayout' });
-            onClose();
-          }
-        }}
+        onClick={
+          readOnly
+            ? undefined
+            : () => {
+                if (isBrowserRuntime) {
+                  // Open the native file picker; the import is applied in onChange below.
+                  fileInputRef.current?.click();
+                } else {
+                  transport.send({ type: 'importLayout' });
+                  onClose();
+                }
+              }
+        }
+        disabled={readOnly}
       >
         Import Layout
       </MenuItem>
@@ -97,6 +120,7 @@ export function SettingsModal({
           type="file"
           accept="application/json"
           className="hidden"
+          disabled={readOnly}
           onChange={(e) => {
             const file = e.target.files?.[0];
             // Reset the value so re-selecting the same file fires change again.
@@ -115,18 +139,23 @@ export function SettingsModal({
             type="text"
             value={assetDirDraft}
             placeholder="Absolute asset directory path"
+            disabled={readOnly}
             onChange={(e) => setAssetDirDraft(e.target.value)}
-            className="flex-1 min-w-0 text-xs py-2 px-4 bg-bg border-2 border-border rounded-none text-text"
+            className="flex-1 min-w-0 text-xs py-2 px-4 bg-bg border-2 border-border rounded-none text-text disabled:opacity-50 disabled:cursor-default"
           />
           <Button
-            variant="default"
+            variant={readOnly ? 'disabled' : 'default'}
             size="sm"
-            onClick={() => {
-              const path = assetDirDraft.trim();
-              if (!path) return;
-              transport.send({ type: 'addExternalAssetDirectory', path });
-              setAssetDirDraft('');
-            }}
+            onClick={
+              readOnly
+                ? undefined
+                : () => {
+                    const path = assetDirDraft.trim();
+                    if (!path) return;
+                    transport.send({ type: 'addExternalAssetDirectory', path });
+                    setAssetDirDraft('');
+                  }
+            }
             className="shrink-0"
           >
             Add
@@ -134,10 +163,15 @@ export function SettingsModal({
         </div>
       ) : (
         <MenuItem
-          onClick={() => {
-            transport.send({ type: 'addExternalAssetDirectory' });
-            onClose();
-          }}
+          onClick={
+            readOnly
+              ? undefined
+              : () => {
+                  transport.send({ type: 'addExternalAssetDirectory' });
+                  onClose();
+                }
+          }
+          disabled={readOnly}
         >
           Add Asset Directory
         </MenuItem>
@@ -151,9 +185,13 @@ export function SettingsModal({
             {dir.split(/[/\\]/).pop() ?? dir}
           </span>
           <Button
-            variant="ghost"
+            variant={readOnly ? 'disabled' : 'ghost'}
             size="sm"
-            onClick={() => transport.send({ type: 'removeExternalAssetDirectory', path: dir })}
+            onClick={
+              readOnly
+                ? undefined
+                : () => transport.send({ type: 'removeExternalAssetDirectory', path: dir })
+            }
             className="shrink-0"
           >
             x
@@ -163,6 +201,7 @@ export function SettingsModal({
       <Checkbox
         label="Sound Notifications"
         checked={soundLocal}
+        disabled={readOnly}
         onChange={() => {
           const newVal = !isSoundEnabled();
           setSoundEnabled(newVal);
@@ -173,22 +212,35 @@ export function SettingsModal({
       <Checkbox
         label="Watch All Sessions"
         checked={watchAllSessions}
+        disabled={readOnly}
         onChange={onToggleWatchAllSessions}
       />
       <Checkbox
         label="Instant Detection (Hooks)"
         checked={hooksEnabled}
+        disabled={readOnly}
         onChange={onToggleHooksEnabled}
       />
       <Checkbox
         label="Always Show Labels"
         checked={alwaysShowOverlay}
+        disabled={readOnly}
         onChange={onToggleAlwaysShowOverlay}
       />
       {showAreasAvailable && (
-        <Checkbox label="Show Areas" checked={showAreas} onChange={onToggleShowAreas} />
+        <Checkbox
+          label="Show Areas"
+          checked={showAreas}
+          disabled={readOnly}
+          onChange={onToggleShowAreas}
+        />
       )}
-      <Checkbox label="Debug View" checked={isDebugMode} onChange={onToggleDebugMode} />
+      <Checkbox
+        label="Debug View"
+        checked={isDebugMode}
+        disabled={readOnly}
+        onChange={onToggleDebugMode}
+      />
     </Modal>
   );
 }

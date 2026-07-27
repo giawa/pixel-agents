@@ -80,6 +80,8 @@ interface ExtensionMessageState {
   setAreaMappings: (m: Record<string, string[]>) => void;
   showAreas: boolean;
   setShowAreas: (v: boolean) => void;
+  /** True when the WebSocket client is non-localhost; UI mutations disabled. */
+  readOnly: boolean;
 }
 
 function saveAgentSeats(os: OfficeState): void {
@@ -120,6 +122,12 @@ export function useExtensionMessages(
   const [hooksInfoShown, setHooksInfoShown] = useState(true);
   const [areaMappings, setAreaMappings] = useState<Record<string, string[]>>({});
   const [showAreas, setShowAreas] = useState(false);
+  const [readOnly, setReadOnly] = useState(false);
+  // Mirror readOnly in a ref so the message handler (subscribed once) sees the
+  // latest value without re-subscribing. settingsLoaded arrives after the
+  // handler is already mounted, so the closure would otherwise capture the
+  // initial false.
+  const readOnlyRef = useRef(false);
 
   // Track whether initial layout has been loaded (ref to avoid re-render)
   const layoutReadyRef = useRef(false);
@@ -199,7 +207,7 @@ export function useExtensionMessages(
         if (msg.wasReset) {
           setLayoutWasReset(true);
         }
-        if (os.characters.size > 0) {
+        if (os.characters.size > 0 && !readOnlyRef.current) {
           saveAgentSeats(os);
         }
       } else if (msg.type === 'agentCreated') {
@@ -235,7 +243,7 @@ export function useExtensionMessages(
           os.addAgent(id, palette, hueShift, undefined, undefined, folderName);
           noteFolderName(folderName);
         }
-        saveAgentSeats(os);
+        if (!readOnlyRef.current) saveAgentSeats(os);
       } else if (msg.type === 'agentClosed') {
         const id = msg.id as number;
         setAgents((prev) => prev.filter((a) => a !== id));
@@ -560,6 +568,11 @@ export function useExtensionMessages(
         if (typeof msg.extensionVersion === 'string') {
           setExtensionVersion(msg.extensionVersion as string);
         }
+        if (typeof msg.readOnly === 'boolean') {
+          const ro = msg.readOnly as boolean;
+          readOnlyRef.current = ro;
+          setReadOnly(ro);
+        }
       } else if (msg.type === 'externalAssetDirectoriesUpdated') {
         if (Array.isArray(msg.dirs)) {
           setExternalAssetDirectories(msg.dirs as string[]);
@@ -621,5 +634,6 @@ export function useExtensionMessages(
     setAreaMappings,
     showAreas,
     setShowAreas,
+    readOnly,
   };
 }

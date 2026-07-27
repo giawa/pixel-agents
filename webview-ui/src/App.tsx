@@ -89,6 +89,7 @@ function App() {
     setAreaMappings,
     showAreas,
     setShowAreas,
+    readOnly,
   } = useExtensionMessages(getOfficeState, editor.setLastSavedLayout, isEditDirty);
 
   // Show migration notice once layout reset is detected
@@ -320,6 +321,7 @@ function App() {
         panRef={editor.panRef}
         showAreas={effectiveShowAreas}
         activeAreaLabel={activeAreaLabel}
+        readOnly={readOnly}
       />
 
       {!isDebugMode ? (
@@ -484,6 +486,7 @@ function App() {
         isSettingsOpen={isSettingsOpen}
         onToggleSettings={() => setIsSettingsOpen((v) => !v)}
         workspaceFolders={workspaceFolders}
+        readOnly={readOnly}
       />
 
       <VersionIndicator
@@ -526,6 +529,7 @@ function App() {
         showAreasAvailable={areasAvailable}
         onExportLayout={handleExportLayout}
         onImportLayout={handleImportLayout}
+        readOnly={readOnly}
       />
 
       {showMigrationNotice && (

@@ -653,6 +653,9 @@ components:
             type: string
         showAreas:
           type: boolean
+        readOnly:
+          type: boolean
+          description: True when the client is not on localhost; mutations are rejected server-side.
 
     AreaMappingsLoaded:
       description: |

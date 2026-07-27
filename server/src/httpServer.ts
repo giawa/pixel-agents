@@ -191,6 +191,7 @@ function registerWebSocketRoute(app: FastifyInstance, options: HttpServerOptions
     }
 
     const { store } = options;
+    const isLocal = isLoopback(request.ip);
 
     // Pipe store events to WebSocket client
     const onAgentAdded = (id: number, agent: AgentState) => {
@@ -234,6 +235,7 @@ function registerWebSocketRoute(app: FastifyInstance, options: HttpServerOptions
           cache: options.assetCache ?? null,
           onSetHooksEnabled: options.onSetHooksEnabled,
           onReloadAssets: options.onReloadAssets,
+          isLocal,
         });
       } catch {
         // Malformed JSON, ignore
@@ -263,6 +265,10 @@ function bearerAuth(expectedToken: string) {
 }
 
 // ── Utilities ──────────────────────────────────────────────────
+
+function isLoopback(ip: string): boolean {
+  return ip === '127.0.0.1' || ip === '::1' || ip === '::ffff:127.0.0.1';
+}
 
 function safeSend(
   socket: { send: (data: string) => void; readyState: number },

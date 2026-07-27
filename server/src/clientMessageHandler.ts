@@ -37,7 +37,31 @@ export interface ClientMessageContext {
   onSetHooksEnabled?: SetHooksEnabledSideEffect;
   /** Reload assets after an external-asset-directory change. Needs the dist root, known only to cli.ts. */
   onReloadAssets?: ReloadAssetsSideEffect;
+  /** True when the WebSocket client is on localhost. Remote clients are read-only. Defaults to true. */
+  isLocal?: boolean;
 }
+
+/**
+ * Messages a remote (non-localhost) WebSocket client may send. Everything
+ * else is rejected. This is an allowlist (not a blocklist) on purpose: when
+ * a new ClientMessage variant is added to the AsyncAPI contract, it is
+ * blocked for remote clients by default until someone explicitly adds it
+ * here, preventing accidental exposure of new mutations to remote viewers.
+ *
+ * - webviewReady: handshake; server replies with the full state (assets,
+ *   settings, agents, layout). A remote viewer can't do anything without it.
+ * - requestDiagnostics: read-only point-to-point reply with agent diagnostics.
+ *
+ * Notably NOT allowed:
+ * - focusAgent, exportLayout, importLayout, openSessionsFolder: all are no-ops
+ *   in standalone (host- or browser-handled). Allowing them would change
+ *   nothing functionally, but the warning log on rejection surfaces the
+ *   decision point for reviewers if standalone ever gains real support.
+ * - All mutation types (closeAgent, saveLayout, settings toggles, ...): the
+ *   entire point of remote read-only mode is that these can't run.
+ * - launchAgent: currently a no-op in standalone (VS Code adapter only).
+ */
+const REMOTE_ALLOWED_TYPES = new Set(['webviewReady', 'requestDiagnostics']);
 
 // ── Setting key constants (mirror adapters/vscode/constants.ts) ──
 const KEY_SOUND_ENABLED = 'pixel-agents.soundEnabled';
@@ -62,6 +86,12 @@ export function handleClientMessage(
 ): void {
   const { store, runtime } = ctx;
   const adapter = store.getAdapter();
+  const isLocal = ctx.isLocal !== false;
+
+  if (!isLocal && typeof msg.type === 'string' && !REMOTE_ALLOWED_TYPES.has(msg.type)) {
+    console.warn('[Pixel Agents] Rejecting message from remote client:', msg.type);
+    return;
+  }
 
   switch (msg.type) {
     case 'webviewReady':
@@ -243,6 +273,7 @@ function handleWebviewReady(send: WsSend, ctx: ClientMessageContext): void {
     hooksInfoShown: adapter?.getSetting(KEY_HOOKS_INFO_SHOWN, false) ?? false,
     externalAssetDirectories: cfg.externalAssetDirectories,
     showAreas,
+    readOnly: ctx.isLocal === false || undefined,
   });
 
   // 4b. Folder→Area mappings (must arrive before existingAgents so the
