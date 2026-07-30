@@ -125,9 +125,20 @@ export function handleClientMessage(
 
     case 'saveAgentSeats':
       if (msg.seats) {
-        adapter?.saveSeats(
-          msg.seats as Record<string, { palette?: number; hueShift?: number; seatId?: string }>,
-        );
+        const seats = msg.seats as Record<
+          string,
+          { palette?: number; hueShift?: number; seatId?: string }
+        >;
+        // Sync palette/hueShift back to AgentState so existingAgents stays consistent
+        for (const [idStr, meta] of Object.entries(seats)) {
+          const id = Number(idStr);
+          const agent = store.get(id);
+          if (agent) {
+            if (meta.palette !== undefined) agent.palette = meta.palette;
+            if (meta.hueShift !== undefined) agent.hueShift = meta.hueShift;
+          }
+        }
+        adapter?.saveSeats(seats);
       }
       break;
 
@@ -297,6 +308,8 @@ function handleWebviewReady(send: WsSend, ctx: ClientMessageContext): void {
   const agentIds: number[] = [];
   const folderNames: Record<number, string> = {};
   const externalAgents: Record<number, boolean> = {};
+  const persistedSeats = adapter?.loadSeats() ?? {};
+  const agentMeta: Record<number, { palette?: number; hueShift?: number; seatId?: string }> = {};
   for (const [id, agent] of store) {
     agentIds.push(id);
     if (agent.folderName) {
@@ -305,12 +318,17 @@ function handleWebviewReady(send: WsSend, ctx: ClientMessageContext): void {
     if (agent.isExternal) {
       externalAgents[id] = true;
     }
+    const persisted = persistedSeats[String(id)];
+    agentMeta[id] = {
+      palette: agent.palette,
+      hueShift: agent.hueShift,
+      seatId: persisted?.seatId,
+    };
   }
-  const seats = adapter?.loadSeats() ?? {};
   send({
     type: 'existingAgents',
     agents: agentIds,
-    agentMeta: seats,
+    agentMeta,
     folderNames,
     externalAgents,
   });

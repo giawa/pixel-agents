@@ -15,6 +15,7 @@
 import type { GenericAgentEvent } from '../../core/src/genericAgent.js';
 import type { AgentRuntime } from './agentRuntime.js';
 import type { AgentStateStore } from './agentStateStore.js';
+import { assignPaletteIfNeeded } from './paletteAssigner.js';
 import { cancelPermissionTimer, cancelWaitingTimer } from './timerManager.js';
 import type { AgentState } from './types.js';
 
@@ -40,9 +41,7 @@ export class GenericAgentHandler {
    */
   handleEvent(clientAgentId: string, event: GenericAgentEvent): void {
     if (debug) {
-      console.log(
-        `[Pixel Agents] Generic API: ${clientAgentId} -> ${event.kind}`,
-      );
+      console.log(`[Pixel Agents] Generic API: ${clientAgentId} -> ${event.kind}`);
     }
 
     switch (event.kind) {
@@ -110,6 +109,8 @@ export class GenericAgentHandler {
       palette: event.palette,
       hueShift: event.hueShift,
     };
+
+    assignPaletteIfNeeded(agent, this.store);
 
     this.store.set(internalId, agent);
     this.store.persist();

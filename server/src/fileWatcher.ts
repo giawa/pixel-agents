@@ -42,6 +42,7 @@ import {
   PROJECT_SCAN_INTERVAL_MS,
 } from './constants.js';
 import type { DismissalTracker } from './dismissalTracker.js';
+import { assignPaletteIfNeeded } from './paletteAssigner.js';
 import { pathsMatch } from './pathKey.js';
 import { cancelPermissionTimer, cancelWaitingTimer, clearAgentActivity } from './timerManager.js';
 import { processTranscriptLine } from './transcriptParser.js';
@@ -522,6 +523,8 @@ function adoptTerminalForFile(
     outputTokens: 0,
   };
 
+  assignPaletteIfNeeded(agent, agents);
+
   agents.set(id, agent);
   activeAgentIdRef.current = id;
   persistAgents();
@@ -705,6 +708,8 @@ export function scanForTeammateFiles(
       teamName: parentAgent?.teamName,
       teamUsesTmux: parentAgent?.teamUsesTmux,
     };
+
+    assignPaletteIfNeeded(agent, agents);
 
     agents.set(id, agent);
     persistAgents();
@@ -905,6 +910,7 @@ export function adoptExternalSessionFromHook(
       inputTokens: 0,
       outputTokens: 0,
     };
+    assignPaletteIfNeeded(agent, agents);
     agents.set(id, agent);
     persistAgents();
     if (debug) {
@@ -985,6 +991,8 @@ function adoptExternalSession(
     inputTokens: 0,
     outputTokens: 0,
   };
+
+  assignPaletteIfNeeded(agent, agents);
 
   agents.set(id, agent);
   persistAgents();
