@@ -1,5 +1,6 @@
 import { useRef, useState } from 'react';
 
+import { CLIENT_SETTING_KEYS, setClientSetting } from '../clientSettings.js';
 import { isSoundEnabled, setSoundEnabled } from '../notificationSound.js';
 import { isBrowserRuntime } from '../runtime.js';
 import { transport } from '../transport/index.js';
@@ -201,12 +202,15 @@ export function SettingsModal({
       <Checkbox
         label="Sound Notifications"
         checked={soundLocal}
-        disabled={readOnly}
         onChange={() => {
           const newVal = !isSoundEnabled();
           setSoundEnabled(newVal);
           setSoundLocal(newVal);
-          transport.send({ type: 'setSoundEnabled', enabled: newVal });
+          if (readOnly) {
+            setClientSetting(CLIENT_SETTING_KEYS.SOUND_ENABLED, newVal);
+          } else {
+            transport.send({ type: 'setSoundEnabled', enabled: newVal });
+          }
         }}
       />
       <Checkbox
@@ -224,16 +228,10 @@ export function SettingsModal({
       <Checkbox
         label="Always Show Labels"
         checked={alwaysShowOverlay}
-        disabled={readOnly}
         onChange={onToggleAlwaysShowOverlay}
       />
       {showAreasAvailable && (
-        <Checkbox
-          label="Show Areas"
-          checked={showAreas}
-          disabled={readOnly}
-          onChange={onToggleShowAreas}
-        />
+        <Checkbox label="Show Areas" checked={showAreas} onChange={onToggleShowAreas} />
       )}
       <Checkbox
         label="Debug View"

@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 import { toMajorMinor } from './changelogData.js';
+import { CLIENT_SETTING_KEYS, setClientSetting } from './clientSettings.js';
 import { BottomToolbar } from './components/BottomToolbar.js';
 import { ChangelogModal } from './components/ChangelogModal.js';
 import { ConnectionIndicator } from './components/ConnectionIndicator.js';
@@ -106,13 +107,21 @@ function App() {
   const currentMajorMinor = toMajorMinor(extensionVersion);
 
   const handleWhatsNewDismiss = useCallback(() => {
+    if (readOnly) {
+      setClientSetting(CLIENT_SETTING_KEYS.LAST_SEEN_VERSION, currentMajorMinor);
+      return;
+    }
     transport.send({ type: 'setLastSeenVersion', version: currentMajorMinor });
-  }, [currentMajorMinor]);
+  }, [currentMajorMinor, readOnly]);
 
   const handleOpenChangelog = useCallback(() => {
     setIsChangelogOpen(true);
+    if (readOnly) {
+      setClientSetting(CLIENT_SETTING_KEYS.LAST_SEEN_VERSION, currentMajorMinor);
+      return;
+    }
     transport.send({ type: 'setLastSeenVersion', version: currentMajorMinor });
-  }, [currentMajorMinor]);
+  }, [currentMajorMinor, readOnly]);
 
   // Sync alwaysShowOverlay from persisted settings
   useEffect(() => {
@@ -123,10 +132,14 @@ function App() {
   const handleToggleAlwaysShowOverlay = useCallback(() => {
     setAlwaysShowOverlay((prev) => {
       const newVal = !prev;
-      transport.send({ type: 'setAlwaysShowLabels', enabled: newVal });
+      if (readOnly) {
+        setClientSetting(CLIENT_SETTING_KEYS.ALWAYS_SHOW_LABELS, newVal);
+      } else {
+        transport.send({ type: 'setAlwaysShowLabels', enabled: newVal });
+      }
       return newVal;
     });
-  }, []);
+  }, [readOnly]);
 
   const handleSelectAgent = useCallback((id: number) => {
     transport.send({ type: 'focusAgent', id });
@@ -157,13 +170,17 @@ function App() {
     [areaMappings, setAreaMappings],
   );
 
-  // Toggle global Show Areas — persisted via setShowAreas message; runs server-
-  // side through configPersistence.
+  // Toggle global Show Areas — persisted via localStorage for remote clients,
+  // or server for localhost clients.
   const onToggleShowAreas = useCallback(() => {
     const next = !showAreas;
     setShowAreas(next);
-    transport.send({ type: 'setShowAreas', enabled: next });
-  }, [showAreas, setShowAreas]);
+    if (readOnly) {
+      setClientSetting(CLIENT_SETTING_KEYS.SHOW_AREAS, next);
+    } else {
+      transport.send({ type: 'setShowAreas', enabled: next });
+    }
+  }, [showAreas, setShowAreas, readOnly]);
 
   // When AREA_PAINT is active in the editor, force the overlay on even if the
   // user has toggled Show Areas off globally — they need to see what they're
@@ -428,7 +445,11 @@ function App() {
           position="top-right"
           onDismiss={() => {
             setHooksTooltipDismissed(true);
-            transport.send({ type: 'setHooksInfoShown' });
+            if (readOnly) {
+              setClientSetting(CLIENT_SETTING_KEYS.HOOKS_INFO_SHOWN, true);
+            } else {
+              transport.send({ type: 'setHooksInfoShown' });
+            }
           }}
         >
           <span className="text-sm text-text leading-none">
@@ -438,7 +459,11 @@ function App() {
               onClick={() => {
                 setIsHooksInfoOpen(true);
                 setHooksTooltipDismissed(true);
-                transport.send({ type: 'setHooksInfoShown' });
+                if (readOnly) {
+                  setClientSetting(CLIENT_SETTING_KEYS.HOOKS_INFO_SHOWN, true);
+                } else {
+                  transport.send({ type: 'setHooksInfoShown' });
+                }
               }}
             >
               View more

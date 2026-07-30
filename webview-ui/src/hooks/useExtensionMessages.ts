@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 
+import { CLIENT_SETTING_KEYS, resolveClientSetting } from '../clientSettings.js';
 import { playDoneSound, playPermissionSound, setSoundEnabled } from '../notificationSound.js';
 import type { OfficeState } from '../office/engine/officeState.js';
 import { setFloorSprites } from '../office/floorTiles.js';
@@ -542,36 +543,68 @@ export function useExtensionMessages(
         const folders = msg.folders as WorkspaceFolder[];
         setWorkspaceFolders(folders);
       } else if (msg.type === 'settingsLoaded') {
-        const soundOn = msg.soundEnabled as boolean;
-        setSoundEnabled(soundOn);
+        // Read readOnly flag first to determine whether to use localStorage
+        const isReadOnly = msg.readOnly === true;
+        if (typeof msg.readOnly === 'boolean') {
+          readOnlyRef.current = isReadOnly;
+          setReadOnly(isReadOnly);
+        }
+
+        // Client-only settings: use localStorage for remote clients, server values for localhost
+        setSoundEnabled(
+          resolveClientSetting(
+            isReadOnly,
+            CLIENT_SETTING_KEYS.SOUND_ENABLED,
+            msg.soundEnabled as boolean,
+          ),
+        );
         if (typeof msg.watchAllSessions === 'boolean') {
           setWatchAllSessions(msg.watchAllSessions as boolean);
         }
         if (typeof msg.alwaysShowLabels === 'boolean') {
-          setAlwaysShowLabels(msg.alwaysShowLabels as boolean);
+          setAlwaysShowLabels(
+            resolveClientSetting(
+              isReadOnly,
+              CLIENT_SETTING_KEYS.ALWAYS_SHOW_LABELS,
+              msg.alwaysShowLabels as boolean,
+            ),
+          );
         }
         if (typeof msg.hooksEnabled === 'boolean') {
           setHooksEnabled(msg.hooksEnabled as boolean);
         }
         if (typeof msg.hooksInfoShown === 'boolean') {
-          setHooksInfoShown(msg.hooksInfoShown as boolean);
+          setHooksInfoShown(
+            resolveClientSetting(
+              isReadOnly,
+              CLIENT_SETTING_KEYS.HOOKS_INFO_SHOWN,
+              msg.hooksInfoShown as boolean,
+            ),
+          );
         }
         if (typeof msg.showAreas === 'boolean') {
-          setShowAreas(msg.showAreas as boolean);
+          setShowAreas(
+            resolveClientSetting(
+              isReadOnly,
+              CLIENT_SETTING_KEYS.SHOW_AREAS,
+              msg.showAreas as boolean,
+            ),
+          );
         }
         if (Array.isArray(msg.externalAssetDirectories)) {
           setExternalAssetDirectories(msg.externalAssetDirectories as string[]);
         }
         if (typeof msg.lastSeenVersion === 'string') {
-          setLastSeenVersion(msg.lastSeenVersion as string);
+          setLastSeenVersion(
+            resolveClientSetting(
+              isReadOnly,
+              CLIENT_SETTING_KEYS.LAST_SEEN_VERSION,
+              msg.lastSeenVersion as string,
+            ),
+          );
         }
         if (typeof msg.extensionVersion === 'string') {
           setExtensionVersion(msg.extensionVersion as string);
-        }
-        if (typeof msg.readOnly === 'boolean') {
-          const ro = msg.readOnly as boolean;
-          readOnlyRef.current = ro;
-          setReadOnly(ro);
         }
       } else if (msg.type === 'externalAssetDirectoriesUpdated') {
         if (Array.isArray(msg.dirs)) {
