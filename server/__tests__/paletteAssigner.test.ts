@@ -1,7 +1,8 @@
 import { beforeEach, describe, expect, it } from 'vitest';
 
 import { AgentStateStore } from '../src/agentStateStore.js';
-import { assignPaletteIfNeeded, HUE_SHIFT_MAX_DEG, PALETTE_COUNT } from '../src/paletteAssigner.js';
+import { HUE_SHIFT_MAX_DEG, PALETTE_COUNT } from '../src/constants.js';
+import { assignPaletteIfNeeded } from '../src/paletteAssigner.js';
 import type { AgentState } from '../src/types.js';
 
 function createTestAgent(overrides: Partial<AgentState> = {}): AgentState {

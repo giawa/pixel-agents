@@ -7,11 +7,8 @@
 
 import { pickDiversePalette } from '../../core/src/paletteUtils.js';
 import type { AgentStateStore } from './agentStateStore.js';
+import { PALETTE_COUNT } from './constants.js';
 import type { AgentState } from './types.js';
-
-export const PALETTE_COUNT = 6;
-/** Inclusive upper bound for a valid hue shift in degrees. */
-export const HUE_SHIFT_MAX_DEG = 360;
 
 /**
  * Assign palette and hueShift to an agent if not already set.
