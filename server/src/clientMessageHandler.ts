@@ -4,6 +4,7 @@ import type { AgentStateStore } from './agentStateStore.js';
 import type { LoadedAssets, LoadedCharacterSprites, LoadedPetSprites } from './assetLoader.js';
 import { readConfig, writeConfig } from './configPersistence.js';
 import { readLayoutFromFile, writeLayoutToFile } from './layoutPersistence.js';
+import { HUE_SHIFT_MAX_DEG, PALETTE_COUNT } from './paletteAssigner.js';
 import { claudeProvider } from './providers/index.js';
 
 type WsSend = (message: Record<string, unknown>) => void;
@@ -95,9 +96,37 @@ export function handleClientMessage(
 
     case 'saveAgentSeats':
       if (msg.seats) {
-        adapter?.saveSeats(
-          msg.seats as Record<string, { palette?: number; hueShift?: number; seatId?: string }>,
-        );
+        const seats = msg.seats as Record<
+          string,
+          { palette?: number; hueShift?: number; seatId?: string }
+        >;
+        // Sync palette/hueShift back to AgentState so existingAgents stays
+        // consistent across reconnects. Validate ranges to keep a remote
+        // client (or a hand-edited payload) from poisoning the gauge with
+        // out-of-range values that would render as a glitch.
+        for (const [idStr, meta] of Object.entries(seats)) {
+          const id = Number(idStr);
+          const agent = store.get(id);
+          if (agent) {
+            if (
+              meta.palette !== undefined &&
+              Number.isInteger(meta.palette) &&
+              meta.palette >= 0 &&
+              meta.palette < PALETTE_COUNT
+            ) {
+              agent.palette = meta.palette;
+            }
+            if (
+              meta.hueShift !== undefined &&
+              Number.isInteger(meta.hueShift) &&
+              meta.hueShift >= 0 &&
+              meta.hueShift <= HUE_SHIFT_MAX_DEG
+            ) {
+              agent.hueShift = meta.hueShift;
+            }
+          }
+        }
+        adapter?.saveSeats(seats);
       }
       break;
 
@@ -266,6 +295,8 @@ function handleWebviewReady(send: WsSend, ctx: ClientMessageContext): void {
   const agentIds: number[] = [];
   const folderNames: Record<number, string> = {};
   const externalAgents: Record<number, boolean> = {};
+  const persistedSeats = adapter?.loadSeats() ?? {};
+  const agentMeta: Record<number, { palette?: number; hueShift?: number; seatId?: string }> = {};
   for (const [id, agent] of store) {
     agentIds.push(id);
     if (agent.folderName) {
@@ -274,12 +305,17 @@ function handleWebviewReady(send: WsSend, ctx: ClientMessageContext): void {
     if (agent.isExternal) {
       externalAgents[id] = true;
     }
+    const persisted = persistedSeats[String(id)];
+    agentMeta[id] = {
+      palette: agent.palette,
+      hueShift: agent.hueShift,
+      seatId: persisted?.seatId,
+    };
   }
-  const seats = adapter?.loadSeats() ?? {};
   send({
     type: 'existingAgents',
     agents: agentIds,
-    agentMeta: seats,
+    agentMeta,
     folderNames,
     externalAgents,
   });

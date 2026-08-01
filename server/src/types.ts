@@ -79,6 +79,12 @@ export interface AgentState {
    *  the webview never creates a Subtask ghost for them. Transient, lazily
    *  created, never persisted. */
   teammateSpawnToolIds?: Set<string>;
+
+  // -- Avatar customization --
+  /** Preferred character palette (0-5). If undefined, auto-assigned for diversity. */
+  palette?: number;
+  /** Hue shift in degrees (0-360). Rotates the base palette colors. */
+  hueShift?: number;
 }
 
 export interface PersistedAgent {

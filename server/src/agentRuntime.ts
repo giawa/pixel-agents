@@ -36,6 +36,7 @@ import {
 } from './fileWatcher.js';
 import type { HookEvent } from './hookEventHandler.js';
 import { HookEventHandler } from './hookEventHandler.js';
+import { assignPaletteIfNeeded } from './paletteAssigner.js';
 import { PathSet, pathsMatch } from './pathKey.js';
 import { SessionRouter } from './sessionRouter.js';
 import { SubagentWatch } from './subagentWatch.js';
@@ -515,6 +516,8 @@ export class AgentRuntime {
         leadAgentId: p.leadAgentId,
         teamUsesTmux: p.teamUsesTmux,
       };
+
+      assignPaletteIfNeeded(agent, this.store);
 
       this.store.set(p.id, agent);
       this.knownJsonlFiles.add(p.jsonlFile);
