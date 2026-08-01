@@ -518,7 +518,6 @@ export class AgentRuntime {
       };
 
       assignPaletteIfNeeded(agent, this.store);
-
       this.store.set(p.id, agent);
       this.knownJsonlFiles.add(p.jsonlFile);
 

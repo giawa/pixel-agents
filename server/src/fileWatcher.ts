@@ -532,7 +532,6 @@ function adoptTerminalForFile(
   };
 
   assignPaletteIfNeeded(agent, agents);
-
   agents.set(id, agent);
   activeAgentIdRef.current = id;
   persistAgents();
@@ -752,7 +751,6 @@ export function scanForTeammateFiles(
     };
 
     assignPaletteIfNeeded(agent, agents);
-
     agents.set(id, agent);
     persistAgents();
 
@@ -1218,7 +1216,6 @@ function adoptExternalSession(
   };
 
   assignPaletteIfNeeded(agent, agents);
-
   agents.set(id, agent);
   persistAgents();
 
