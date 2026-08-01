@@ -97,5 +97,5 @@ export const CONFIG_FILE_NAME = 'config.json';
 export const PALETTE_COUNT = 6;
 /** Inclusive upper bound for a valid agent hue shift, in degrees. Used by
  *  clientMessageHandler to guard saveAgentSeats payloads from a remote or
- *  hand-edited source poisoning the gauge with out-of-range values. */
+ *  hand-edited source corrupting the stored values with out-of-range values. */
 export const HUE_SHIFT_MAX_DEG = 360;

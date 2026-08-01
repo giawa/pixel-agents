@@ -102,8 +102,8 @@ export function handleClientMessage(
         >;
         // Sync palette/hueShift back to AgentState so existingAgents stays
         // consistent across reconnects. Validate ranges to keep a remote
-        // client (or a hand-edited payload) from poisoning the gauge with
-        // out-of-range values that would render as a glitch.
+        // client (or a hand-edited payload) from corrupting the stored
+        // values with out-of-range inputs that would render as a glitch.
         for (const [idStr, meta] of Object.entries(seats)) {
           const id = Number(idStr);
           const agent = store.get(id);
