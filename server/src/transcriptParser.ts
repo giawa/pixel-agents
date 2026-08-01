@@ -3,7 +3,8 @@ const debug = process.env.PIXEL_AGENTS_DEBUG !== '0';
 import type { HookProvider } from '../../core/src/provider.js';
 import type { AgentStateStore } from './agentStateStore.js';
 import { TEXT_IDLE_DELAY_MS, TOOL_DONE_DELAY_MS } from './constants.js';
-import { hasInlineTeammates } from './teamUtils.js';
+import { updateContextUsage } from './contextUsage.js';
+import { hasInlineTeammates, hasPromotedBackgroundAgent } from './teamUtils.js';
 import {
   cancelPermissionTimer,
   cancelWaitingTimer,
@@ -36,6 +37,53 @@ export function setHookProvider(provider: HookProvider): void {
   hookProvider = provider;
 }
 
+/** The registered provider, for modules that need it outside line parsing
+ *  (fileWatcher seeds context gauges before any line has been read). */
+export function getHookProvider(): HookProvider | null {
+  return hookProvider;
+}
+
+/** Called when a lead's tool_result reports an async agent launch. The host
+ *  reacts by scanning the lead's subagents/ sidecars and classifying each
+ *  spawn by its sidecar name: named -> teammate character, unnamed -> shadow-
+ *  watched sub-agent (fileWatcher.scanForBackgroundAgentFiles). */
+let backgroundAgentDetectedCallback: ((leadAgentId: number) => void) | null = null;
+
+export function setBackgroundAgentDetectedCallback(cb: (leadAgentId: number) => void): void {
+  backgroundAgentDetectedCallback = cb;
+}
+
+/** Called when a queue-operation record marks a background agent finished.
+ *  The host removes the teammate character or stops the shadow watch. */
+let backgroundAgentCompletedCallback: ((leadAgentId: number, toolUseId: string) => void) | null =
+  null;
+
+export function setBackgroundAgentCompletedCallback(
+  cb: (leadAgentId: number, toolUseId: string) => void,
+): void {
+  backgroundAgentCompletedCallback = cb;
+}
+
+/** Notify the host that a spawn tool finished, so it can remove the spawn's
+ *  teammate character or stop its shadow watch. Exported for hookEventHandler,
+ *  which clears foreground tools on the Stop hook. Safe to fire for tools that
+ *  never had a watch — the host's lookups simply miss. */
+export function notifyBackgroundAgentCompleted(leadAgentId: number, toolUseId: string): void {
+  backgroundAgentCompletedCallback?.(leadAgentId, toolUseId);
+}
+
+/** Called when a lead's spawn result names a DIFFERENT team than the one it is
+ *  latched to. Every CLI run of a session mints a fresh implicit team, so a
+ *  resumed lead that spawns again belongs to the new team; the host removes
+ *  the defunct team's teammate characters. */
+let teamSwitchCallback: ((leadAgentId: number, previousTeamName: string) => void) | null = null;
+
+export function setTeamSwitchCallback(
+  cb: (leadAgentId: number, previousTeamName: string) => void,
+): void {
+  teamSwitchCallback = cb;
+}
+
 /** Format a tool status line. Delegates to the active HookProvider's formatToolStatus.
  *  Invariant: a provider is registered before any transcript lines are parsed. */
 export function formatToolStatus(toolName: string, input: Record<string, unknown>): string {
@@ -62,6 +110,7 @@ export function processTranscriptLine(
     const teamMeta = hookProvider?.team?.extractTeamMetadataFromRecord(record);
     if (teamMeta?.teamName && teamMeta.teamName !== agent.teamName) {
       agent.teamName = teamMeta.teamName;
+      agent.teamNameFromTags = true;
       agent.agentName = teamMeta.agentName;
       agent.isTeamLead = undefined;
       agent.leadAgentId = undefined;
@@ -83,23 +132,8 @@ export function processTranscriptLine(
       });
     }
 
-    // -- Token usage extraction from assistant records --
-    const usage = record.message?.usage as
-      { input_tokens?: number; output_tokens?: number } | undefined;
-    if (usage) {
-      if (typeof usage.input_tokens === 'number') {
-        agent.inputTokens += usage.input_tokens;
-      }
-      if (typeof usage.output_tokens === 'number') {
-        agent.outputTokens += usage.output_tokens;
-      }
-      agents.broadcast({
-        type: 'agentTokenUsage',
-        id: agentId,
-        inputTokens: agent.inputTokens,
-        outputTokens: agent.outputTokens,
-      });
-    }
+    // -- Context window usage (drives every agent's context gauge) --
+    updateContextUsage(agentId, agent, agents, record, hookProvider);
 
     // Resilient content extraction: support both record.message.content and record.content
     // Claude Code may change the JSONL structure across versions
@@ -170,6 +204,16 @@ export function processTranscriptLine(
             // EXCEPTION: inline teammates need JSONL tool events even in hooks mode so their
             // tool activity is displayed correctly.
             const isSubagentSpawn = isSubagentTool(toolName);
+            // A spawn call carrying a `name` is a Teammate-to-be: flag it so
+            // the webview never creates a Subtask ghost that the teammate
+            // character replaces seconds later.
+            const isTeammateSpawn =
+              isSubagentSpawn &&
+              typeof block.input?.name === 'string' &&
+              block.input.name.length > 0;
+            if (isTeammateSpawn) {
+              (agent.teammateSpawnToolIds ??= new Set()).add(block.id);
+            }
             const useJsonlToolEvents = agent.hookDelivered && hasInlineTeammates(agentId, agents);
             if (!agent.hookDelivered || useJsonlToolEvents || isSubagentSpawn) {
               const runInBackground = isSubagentSpawn && block.input?.run_in_background === true;
@@ -181,6 +225,7 @@ export function processTranscriptLine(
                 toolName,
                 permissionActive: agent.permissionSent,
                 runInBackground,
+                isTeammateSpawn: isTeammateSpawn || undefined,
               });
             }
           }
@@ -217,7 +262,7 @@ export function processTranscriptLine(
     } else if (record.type === 'user') {
       const content = record.message?.content ?? record.content;
       if (Array.isArray(content)) {
-        const blocks = content as Array<{ type: string; tool_use_id?: string }>;
+        const blocks = content as Array<{ type: string; tool_use_id?: string; content?: unknown }>;
         const hasToolResult = blocks.some((b) => b.type === 'tool_result');
         if (hasToolResult) {
           for (const block of blocks) {
@@ -225,12 +270,88 @@ export function processTranscriptLine(
               const completedToolId = block.tool_use_id;
               const completedToolName = agent.activeToolNames.get(completedToolId);
 
+              // Teammate spawn result (newer harnesses: every Agent spawn is a
+              // background teammate of an implicit team; the lead's own records
+              // carry no team tags, so this result line is the only lead-side
+              // signal). Marks the agent as lead so teammate discovery engages,
+              // then falls through to normal tool-done handling -- the teammate
+              // character replaces the transient Subtask one.
+              const teammateSpawn = completedToolName
+                ? hookProvider?.team?.extractTeammateSpawnFromToolResult?.(
+                    completedToolName,
+                    block.content,
+                  )
+                : null;
+              if (
+                teammateSpawn &&
+                !agent.teamNameFromTags &&
+                !agent.leadAgentId &&
+                agent.teamName !== teammateSpawn.teamName
+              ) {
+                // Last-wins for tag-less LEADS: a resumed session's transcript
+                // carries spawn results from several team generations (each CLI
+                // run mints a fresh session-<8hex> team). Re-latch to the
+                // newest team and drop the defunct team's teammates. Tag-
+                // derived identity (tmux/inline, teammate sessions) stays.
+                //
+                // `!agent.leadAgentId` keeps a TEAMMATE that spawns its own
+                // named Agent from re-latching itself out of its team: it would
+                // flip to the nested team, set isTeamLead, and linkTeammates
+                // would then detach it from its real lead (phantom LEAD, broken
+                // click-to-focus). An agent that already has a lead is never a
+                // re-latch candidate, whatever its teamNameFromTags says.
+                if (agent.teamName) {
+                  teamSwitchCallback?.(agentId, agent.teamName);
+                }
+                agent.teamName = teammateSpawn.teamName;
+                agent.isTeamLead = true;
+                if (debug) {
+                  console.log(
+                    `[Pixel Agents] Agent ${agentId} spawned teammate "${teammateSpawn.teammateName}" -> lead of team ${teammateSpawn.teamName}`,
+                  );
+                }
+                linkTeammates(agentId, agent, agents);
+                agents.broadcast({
+                  type: 'agentTeamInfo',
+                  id: agentId,
+                  teamName: agent.teamName,
+                  agentName: agent.agentName,
+                  isTeamLead: agent.isTeamLead,
+                  leadAgentId: agent.leadAgentId,
+                });
+              }
+
               // Detect background agent launches — keep the tool alive until queue-operation
-              if (isSubagentTool(completedToolName) && isAsyncAgentResult(block)) {
+              if (
+                !teammateSpawn &&
+                isSubagentTool(completedToolName) &&
+                isAsyncAgentResult(block)
+              ) {
                 console.log(
                   `[Pixel Agents] Agent ${agentId} background agent launched: ${completedToolId}`,
                 );
                 agent.backgroundAgentToolIds.add(completedToolId);
+                // Current harnesses OMIT run_in_background from the tool_use
+                // input, so the spawn's original agentToolStart went out
+                // unflagged. Re-broadcast it flagged now that the result
+                // proves it's background: the webview marks the Subtask as
+                // background-parented BEFORE the first turn-end clear, or the
+                // sub-character gets removed and recreated at a new tile.
+                const spawnStatus = agent.activeToolStatuses.get(completedToolId);
+                if (spawnStatus) {
+                  agents.broadcast({
+                    type: 'agentToolStart',
+                    id: agentId,
+                    toolId: completedToolId,
+                    status: spawnStatus,
+                    toolName: completedToolName,
+                    runInBackground: true,
+                    isTeammateSpawn: agent.teammateSpawnToolIds?.has(completedToolId) || undefined,
+                  });
+                }
+                // Classify the spawn right away (sidecar may lag; the periodic
+                // teammate scan retries until it lands).
+                backgroundAgentDetectedCallback?.(agentId);
                 continue; // don't mark as done yet
               }
 
@@ -246,6 +367,8 @@ export function processTranscriptLine(
                   id: agentId,
                   parentToolId: completedToolId,
                 });
+                // Stop the shadow watch on a foreground spawn's transcript.
+                backgroundAgentCompletedCallback?.(agentId, completedToolId);
               }
               agent.activeToolIds.delete(completedToolId);
               agent.activeToolStatuses.delete(completedToolId);
@@ -306,6 +429,8 @@ export function processTranscriptLine(
             agent.activeToolIds.delete(completedToolId);
             agent.activeToolStatuses.delete(completedToolId);
             agent.activeToolNames.delete(completedToolId);
+            // Remove the spawn's teammate character or stop its shadow watch.
+            backgroundAgentCompletedCallback?.(agentId, completedToolId);
             if (!agent.hookDelivered) {
               const toolId = completedToolId;
               setTimeout(() => {
@@ -338,13 +463,21 @@ export function processTranscriptLine(
           if (isSubagentTool(toolName)) {
             agent.activeSubagentToolIds.delete(toolId);
             agent.activeSubagentToolNames.delete(toolId);
+            // A foreground spawn dropped at turn end without a tool_result:
+            // stop its shadow watch too, or it lingers until sessionEnd.
+            backgroundAgentCompletedCallback?.(agentId, toolId);
           }
         }
         if (!agent.hookDelivered) {
           agents.broadcast({ type: 'agentToolsClear', id: agentId });
         }
-        // Re-send background agent tools so webview keeps their sub-agents alive
+        // Re-send background agent tools so webview keeps their sub-agents alive.
+        // toolName + runInBackground are REQUIRED: without them the webview can't
+        // recognize the re-sent tool as a subagent spawn and never recreates the
+        // Subtask sub-character. Skip tools whose agent was promoted to its own
+        // character -- re-sending would spawn a ghost Subtask alongside it.
         for (const toolId of agent.backgroundAgentToolIds) {
+          if (hasPromotedBackgroundAgent(agentId, toolId, agents)) continue;
           const status = agent.activeToolStatuses.get(toolId);
           if (status) {
             agents.broadcast({
@@ -352,6 +485,9 @@ export function processTranscriptLine(
               id: agentId,
               toolId,
               status,
+              toolName: agent.activeToolNames.get(toolId),
+              runInBackground: true,
+              isTeammateSpawn: agent.teammateSpawnToolIds?.has(toolId) || undefined,
             });
           }
         }
@@ -528,8 +664,9 @@ function processProgressRecord(
 
 /**
  * Link teammates within the same team.
- * The lead is the agent with no agentName (or the first one detected in the team).
- * Teammates get leadAgentId pointing to the lead.
+ * The lead is the agent with no agentName (or one already marked isTeamLead).
+ * Teammates get leadAgentId pointing to the lead. If only named teammates are
+ * tracked, linking waits until the lead is detected.
  */
 function linkTeammates(_agentId: number, agent: AgentState, agents: AgentStateStore): void {
   const teamName = agent.teamName;
@@ -554,7 +691,7 @@ function linkTeammates(_agentId: number, agent: AgentState, agents: AgentStateSt
     }
   }
   if (!lead) {
-    // No agent without agentName -- use existing isTeamLead or first agent
+    // No agent without agentName -- an already-marked lead may carry one
     for (const a of teamAgents) {
       if (a.isTeamLead) {
         lead = a;
@@ -563,7 +700,10 @@ function linkTeammates(_agentId: number, agent: AgentState, agents: AgentStateSt
     }
   }
   if (!lead) {
-    lead = teamAgents[0];
+    // Every tracked member carries an agentName: they are all teammates and
+    // the real lead's session isn't tracked (yet). Don't badge a teammate as
+    // LEAD -- this re-runs and links properly once the lead is detected.
+    return;
   }
 
   // Update all team members: mark lead, clear stale lead flags, link teammates

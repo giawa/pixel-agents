@@ -66,14 +66,10 @@ export function parseArgs(argv: string[]): CliArgs {
     } else if (argv[i] === '--token' || argv[i] === '-t') {
       const raw = argv[i + 1];
       if (raw === undefined) {
-        throw new CliArgsError(
-          `Missing value for ${argv[i]}: expected a string token.`,
-        );
+        throw new CliArgsError(`Missing value for ${argv[i]}: expected a string token.`);
       }
       if (raw.length < 8) {
-        throw new CliArgsError(
-          `Invalid --token: must be at least 8 characters.`,
-        );
+        throw new CliArgsError(`Invalid --token: must be at least 8 characters.`);
       }
       args.token = raw;
       i++;
@@ -158,8 +154,12 @@ async function main(): Promise<void> {
           `http://127.0.0.1:${currentConfig.port}`,
           currentConfig.token,
         );
-        copyHookScript(packageRoot);
-        console.log('[Pixel Agents] Hooks installed (user toggle)');
+        const copied = copyHookScript(packageRoot);
+        console.log(
+          copied
+            ? '[Pixel Agents] Hooks installed (user toggle)'
+            : '[Pixel Agents] Hooks NOT installed (user toggle), hook script missing',
+        );
       } else {
         await claudeProvider.uninstallHooks();
         console.log('[Pixel Agents] Hooks uninstalled (user toggle)');
@@ -225,8 +225,12 @@ async function main(): Promise<void> {
     if (runtime.hooksEnabled.current) {
       try {
         await claudeProvider.installHooks(`http://127.0.0.1:${config.port}`, config.token);
-        copyHookScript(packageRoot);
-        console.log('[Pixel Agents] Hooks installed');
+        const copied = copyHookScript(packageRoot);
+        console.log(
+          copied
+            ? '[Pixel Agents] Hooks installed'
+            : '[Pixel Agents] Hooks NOT installed, hook script missing',
+        );
       } catch (err) {
         console.error('[Pixel Agents] Failed to install hooks:', err);
       }

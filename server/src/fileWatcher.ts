@@ -33,6 +33,7 @@ import type { ITerminalAdapter } from '../../core/src/terminalAdapter.js';
 import type { AgentStateStore } from './agentStateStore.js';
 import {
   CLEAR_IDLE_THRESHOLD_MS,
+  DEFAULT_MAX_CONTEXT_TOKENS,
   EXTERNAL_ACTIVE_THRESHOLD_MS,
   EXTERNAL_SCAN_INTERVAL_MS,
   EXTERNAL_STALE_CHECK_INTERVAL_MS,
@@ -41,11 +42,13 @@ import {
   GLOBAL_SCAN_ACTIVE_MIN_SIZE,
   PROJECT_SCAN_INTERVAL_MS,
 } from './constants.js';
+import { seedContextUsage } from './contextUsage.js';
 import type { DismissalTracker } from './dismissalTracker.js';
 import { assignPaletteIfNeeded } from './paletteAssigner.js';
 import { pathsMatch } from './pathKey.js';
+import type { SubagentWatch } from './subagentWatch.js';
 import { cancelPermissionTimer, cancelWaitingTimer, clearAgentActivity } from './timerManager.js';
-import { processTranscriptLine } from './transcriptParser.js';
+import { getHookProvider, processTranscriptLine } from './transcriptParser.js';
 import type { AgentState } from './types.js';
 
 /** Dismissal tracker instance. Set once at startup via setDismissalTracker().
@@ -106,6 +109,11 @@ export function startFileWatching(
   waitingTimers: Map<number, ReturnType<typeof setTimeout>>,
   permissionTimers: Map<number, ReturnType<typeof setTimeout>>,
 ): void {
+  // Every watched agent passes through here, so this is the one place that can
+  // give an agent adopted or restored mid-session a context gauge without
+  // replaying its whole transcript.
+  seedContextUsage(agentId, agents, getHookProvider());
+
   // Single polling approach: reliable on all platforms (macOS, Linux, WSL2, Windows).
   // Previously used triple-redundant fs.watch + fs.watchFile + setInterval, but
   // fs.watch is unreliable on macOS/WSL2 and the redundancy created 3 timers per
@@ -519,8 +527,8 @@ function adoptTerminalForFile(
     linesProcessed: 0,
     seenUnknownRecordTypes: new Set(),
     hookDelivered: false,
-    inputTokens: 0,
-    outputTokens: 0,
+    contextTokens: 0,
+    maxContextTokens: DEFAULT_MAX_CONTEXT_TOKENS,
   };
 
   assignPaletteIfNeeded(agent, agents);
@@ -568,9 +576,31 @@ export function setTeammateRemovalCallback(cb: (teammateAgentId: number) => void
   teammateRemovalCallback = cb;
 }
 
+/** Callback that registers a teammate's OWN session with the hook router.
+ *  Only invoked for teammates that run independent sessions (new-style implicit
+ *  teams); inline teammates share the lead's session and are never registered. */
+let teammateRegisterCallback: ((sessionId: string, agentId: number) => void) | null = null;
+
+/** Register the callback used to route an own-session teammate's hook events to it. */
+export function setTeammateRegisterCallback(
+  cb: (sessionId: string, agentId: number) => void,
+): void {
+  teammateRegisterCallback = cb;
+}
+
 /** Register the TeamProvider that describes the active CLI's Lead+Teammates pattern. */
 export function setTeamProvider(provider: TeamProvider): void {
   teamProvider = provider;
+}
+
+/** Shadow-store watcher for UNNAMED background spawns (sub-agents). Owned by
+ *  AgentRuntime; registered once at startup. When unset (tests wiring only the
+ *  scanners), unnamed spawns are simply not watched. */
+let subagentWatch: SubagentWatch | null = null;
+
+/** Register the SubagentWatch that mirrors unnamed background spawns' transcripts. */
+export function setSubagentWatch(watch: SubagentWatch | null): void {
+  subagentWatch = watch;
 }
 
 /** Register the active HookProvider for non-team capabilities (session roots, etc.). */
@@ -615,15 +645,22 @@ export function scanForTeammateFiles(
   onAgentCreated?: (agent: AgentState) => void,
 ): void {
   if (!teamProvider) return;
-  const teammates = teamProvider.discoverTeammates(projectDir, sessionId);
-
   const parentAgent = agents.get(parentAgentId);
+  // teamName lets the provider also find new-style teammates: independent
+  // top-level sessions tagged with the team, not files under the lead's dir.
+  const teammates = teamProvider.discoverTeammates(projectDir, sessionId, parentAgent?.teamName);
 
-  for (const { jsonlPath: file, teammateName } of teammates) {
+  const parentLiveSpawnIds = parentAgent ? liveSpawnToolIds(parentAgent) : null;
+  for (const { jsonlPath: file, teammateName, sessionId: ownSessionId, toolUseId } of teammates) {
+    // Live-spawn sidecars (they carry the lead's spawn toolUseId) belong to
+    // scanForBackgroundAgentFiles, which classifies them by name: named
+    // background -> teammate, everything else -> watched sub-agent. Adopting
+    // them here would race that classification and mint a spurious teammate.
+    if (toolUseId && parentLiveSpawnIds?.has(toolUseId)) continue;
     if (knownTeammateFiles.has(file)) continue;
 
     // Also check if any existing agent already tracks this file
-    let alreadyTracked = false;
+    let alreadyTracked = subagentWatch?.isWatching(file) ?? false;
     for (const a of agents.values()) {
       if (pathsMatch(a.jsonlFile, file)) {
         alreadyTracked = true;
@@ -660,6 +697,10 @@ export function scanForTeammateFiles(
       existingTeammate.linesProcessed = 0;
       existingTeammate.isWaiting = false;
       existingTeammate.teamUsesTmux = parentAgent?.teamUsesTmux;
+      if (ownSessionId && existingTeammate.sessionId !== ownSessionId) {
+        existingTeammate.sessionId = ownSessionId;
+        teammateRegisterCallback?.(ownSessionId, existingTeammate.id);
+      }
       startFileWatching(
         existingTeammate.id,
         file,
@@ -675,9 +716,10 @@ export function scanForTeammateFiles(
 
     const id = nextAgentIdRef.current++;
     // Read from start -- teammate JSONL is usually small and we want full tool history
+    // New-style teammates carry their own session id; inline teammates share the lead's.
     const agent: AgentState = {
       id,
-      sessionId,
+      sessionId: ownSessionId ?? sessionId,
       terminalRef: undefined,
       isExternal: true,
       projectDir,
@@ -700,8 +742,8 @@ export function scanForTeammateFiles(
       lastDataAt: Date.now(),
       linesProcessed: 0,
       seenUnknownRecordTypes: new Set(),
-      inputTokens: 0,
-      outputTokens: 0,
+      contextTokens: 0,
+      maxContextTokens: DEFAULT_MAX_CONTEXT_TOKENS,
       // Agent Teams fields
       agentName: teammateName,
       leadAgentId: parentAgentId,
@@ -718,11 +760,179 @@ export function scanForTeammateFiles(
       `[Pixel Agents] Teammate detected: "${teammateName}" (Agent ${id}) for parent Agent ${parentAgentId} (${path.basename(file)})`,
     );
 
+    // Own-session teammates get registered so their hook events route directly
+    // to them. Inline teammates share the lead's session and must NOT be
+    // registered -- they would overwrite the lead in the session router.
+    if (ownSessionId) {
+      teammateRegisterCallback?.(ownSessionId, id);
+    }
+
     onAgentCreated?.(agent);
 
     startFileWatching(
       id,
       file,
+      agents,
+      fileWatchers,
+      pollingTimers,
+      waitingTimers,
+      permissionTimers,
+    );
+    readNewLines(id, agents, waitingTimers, permissionTimers);
+  }
+}
+
+/** All of a lead's LIVE spawn tool ids: background spawns (kept alive past
+ *  their tool_result, until the completion queue-operation) plus still-open
+ *  foreground spawn tools (Agent run_in_background:false — same sidecar shape
+ *  on current harnesses, closes with its tool_result). Sidecars matching any
+ *  of these belong to the background-agent flow, not teammate discovery. */
+function liveSpawnToolIds(lead: AgentState): Set<string> {
+  const ids = new Set(lead.backgroundAgentToolIds);
+  for (const toolId of lead.activeToolIds) {
+    const toolName = lead.activeToolNames.get(toolId);
+    if (toolName && hookProvider?.subagentToolNames.has(toolName)) {
+      ids.add(toolId);
+    }
+  }
+  return ids;
+}
+
+/**
+ * Classify background spawns (teams OFF) by their sidecar `name`.
+ *
+ * When a lead's Agent tool_result reports an async launch ("Async agent
+ * launched successfully"), the spawned agent runs in-process with its
+ * transcript under `<projectDir>/<leadSessionId>/subagents/` and a sidecar
+ * carrying agentType/description/toolUseId (+ `name` when the spawn was
+ * named) — but NO team registry anywhere, so the teammate flow never engages
+ * on its own. Per the domain model (CONTEXT.md) the name is the sole
+ * classifier:
+ *
+ * - NAMED spawn → Teammate: its own seated character, named from the sidecar
+ *   `name`; the spawner becomes its Lead (derived team — no teamName is set,
+ *   so team-config polling stays away).
+ * - UNNAMED spawn → Sub-agent: the transient Subtask character stays, and the
+ *   spawn's transcript is watched in the SHADOW store so its live activity
+ *   reaches the sub-character via subagentToolStart/Done translation.
+ *
+ * The anti-spurious gate is the sidecar's toolUseId matching one of the
+ * lead's LIVE backgroundAgentToolIds (instead of the teamName gate real teams
+ * use): only transcripts belonging to a currently-running background spawn
+ * are adopted. Completion (queue-operation on the lead) removes both kinds.
+ */
+export function scanForBackgroundAgentFiles(
+  leadId: number,
+  agents: AgentStateStore,
+  nextAgentIdRef: { current: number },
+  fileWatchers: Map<number, fs.FSWatcher>,
+  pollingTimers: Map<number, ReturnType<typeof setInterval>>,
+  waitingTimers: Map<number, ReturnType<typeof setTimeout>>,
+  permissionTimers: Map<number, ReturnType<typeof setTimeout>>,
+  persistAgents: () => void,
+  onAgentCreated?: (agent: AgentState) => void,
+): void {
+  if (!teamProvider) return;
+  const lead = agents.get(leadId);
+  if (!lead || !lead.sessionId || !lead.projectDir) return;
+  const liveSpawnIds = liveSpawnToolIds(lead);
+  if (liveSpawnIds.size === 0) return;
+
+  const entries = teamProvider.discoverTeammates(lead.projectDir, lead.sessionId);
+  for (const entry of entries) {
+    if (!entry.toolUseId || !liveSpawnIds.has(entry.toolUseId)) continue;
+
+    let alreadyTracked = subagentWatch?.isWatching(entry.jsonlPath) ?? false;
+    if (!alreadyTracked) {
+      for (const a of agents.values()) {
+        if (pathsMatch(a.jsonlFile, entry.jsonlPath)) {
+          alreadyTracked = true;
+          break;
+        }
+      }
+    }
+    if (alreadyTracked) continue;
+
+    // Foreground spawns (Agent run_in_background:false — the tool stays open
+    // for the whole run) write the same sidecar shape. They are within-turn
+    // work whatever the sidecar says: watch them, never seat them.
+    const isForeground = !lead.backgroundAgentToolIds.has(entry.toolUseId);
+
+    if (!entry.name || isForeground) {
+      // Unnamed spawn = Sub-agent: keep the Subtask character, watch the
+      // transcript in the shadow store for live activity. No agentCreated, no
+      // subagentClear, no persistence.
+      subagentWatch?.watch(lead, leadId, {
+        jsonlPath: entry.jsonlPath,
+        toolUseId: entry.toolUseId,
+      });
+      continue;
+    }
+
+    // Named spawn = Teammate.
+    const id = nextAgentIdRef.current++;
+    const agent: AgentState = {
+      id,
+      // In-process: shares the lead's session (like an inline teammate). Never
+      // registered with the session router -- it would overwrite the lead.
+      sessionId: lead.sessionId,
+      terminalRef: undefined,
+      isExternal: true,
+      projectDir: lead.projectDir,
+      jsonlFile: entry.jsonlPath,
+      fileOffset: 0,
+      lineBuffer: '',
+      activeToolIds: new Set(),
+      activeToolStatuses: new Map(),
+      activeToolNames: new Map(),
+      activeSubagentToolIds: new Map(),
+      activeSubagentToolNames: new Map(),
+      backgroundAgentToolIds: new Set(),
+      isWaiting: false,
+      permissionSent: false,
+      hadToolsInTurn: false,
+      hookDelivered: false,
+      lastDataAt: Date.now(),
+      linesProcessed: 0,
+      seenUnknownRecordTypes: new Set(),
+      contextTokens: 0,
+      maxContextTokens: DEFAULT_MAX_CONTEXT_TOKENS,
+      // Teammate-like linkage, but NO teamName: config polling must not touch these.
+      agentName: entry.name,
+      leadAgentId: leadId,
+      spawnToolUseId: entry.toolUseId,
+    };
+
+    agents.set(id, agent);
+
+    // Derived team: spawning a named agent makes the spawner a Lead, whether
+    // or not the CLI registered a team. No teamName on purpose (see above).
+    if (!lead.isTeamLead) {
+      lead.isTeamLead = true;
+      agents.broadcast({
+        type: 'agentTeamInfo',
+        id: leadId,
+        teamName: lead.teamName,
+        agentName: lead.agentName,
+        isTeamLead: true,
+        leadAgentId: lead.leadAgentId,
+      });
+    }
+
+    persistAgents();
+
+    console.log(
+      `[Pixel Agents] Background teammate detected: "${agent.agentName}" (Agent ${id}) for lead Agent ${leadId} (${path.basename(entry.jsonlPath)})`,
+    );
+
+    // The transient Subtask sub-character is superseded by this real character.
+    agents.broadcast({ type: 'subagentClear', id: leadId, parentToolId: entry.toolUseId });
+
+    onAgentCreated?.(agent);
+
+    startFileWatching(
+      id,
+      entry.jsonlPath,
       agents,
       fileWatchers,
       pollingTimers,
@@ -797,6 +1007,20 @@ export function scanAllTeammateFiles(
     // Only scan for lead agents (not teammates themselves)
     if (agent.leadAgentId !== undefined) continue;
     if (!agent.sessionId || !agent.projectDir) continue;
+    // Anonymous background agents (teams OFF): adopt sidecar transcripts for the
+    // lead's live background spawns. Gated by toolUseId matching, not teamName;
+    // no-ops instantly when the lead has no live background spawns.
+    scanForBackgroundAgentFiles(
+      agentId,
+      agents,
+      nextAgentIdRef,
+      fileWatchers,
+      pollingTimers,
+      waitingTimers,
+      permissionTimers,
+      persistAgents,
+      onAgentCreated,
+    );
     // Gate: basic-mode agents never get teamName set. Real team leads do, via JSONL.
     if (!agent.teamName) continue;
 
@@ -907,8 +1131,8 @@ export function adoptExternalSessionFromHook(
       linesProcessed: 0,
       seenUnknownRecordTypes: new Set(),
       folderName,
-      inputTokens: 0,
-      outputTokens: 0,
+      contextTokens: 0,
+      maxContextTokens: DEFAULT_MAX_CONTEXT_TOKENS,
     };
     assignPaletteIfNeeded(agent, agents);
     agents.set(id, agent);
@@ -988,8 +1212,8 @@ function adoptExternalSession(
     linesProcessed: 0,
     seenUnknownRecordTypes: new Set(),
     folderName,
-    inputTokens: 0,
-    outputTokens: 0,
+    contextTokens: 0,
+    maxContextTokens: DEFAULT_MAX_CONTEXT_TOKENS,
   };
 
   assignPaletteIfNeeded(agent, agents);
@@ -1029,7 +1253,7 @@ export function startExternalSessionScanning(
 
   persistAgents: () => void,
   watchAllSessionsRef?: { current: boolean },
-  _hooksEnabledRef?: { current: boolean },
+  hooksEnabledRef?: { current: boolean },
 ): ReturnType<typeof setInterval> {
   return setInterval(() => {
     // Scan all tracked project dirs in both hooks and heuristic modes. Hooks are
@@ -1046,6 +1270,7 @@ export function startExternalSessionScanning(
         waitingTimers,
         permissionTimers,
         persistAgents,
+        hooksEnabledRef,
       );
     }
     // If "Watch All Sessions" is ON, also scan all global project dirs
@@ -1076,6 +1301,9 @@ export function scanExternalDir(
   permissionTimers: Map<number, ReturnType<typeof setTimeout>>,
 
   persistAgents: () => void,
+  /** True when hooks are delivering. Only then does the hook-driven fast-attach
+   *  own teammate sessions; with hooks off this scan IS their discovery path. */
+  hooksEnabledRef?: { current: boolean },
 ): void {
   let files: string[];
   try {
@@ -1156,6 +1384,34 @@ export function scanExternalDir(
       }
     }
     if (tracked) continue;
+
+    // WITH HOOKS ON, teammate sessions belong to team discovery, not to generic
+    // external adoption. Newer harnesses run each spawned agent as its own
+    // top-level session inside the LEAD's projectDir, so this scan sees it too
+    // -- and since workspace polling now runs under hooks as well, it can win
+    // the race against the hook-driven fast-attach. Adopting it here would strip
+    // the teammate identity (no leadAgentId, generic seat instead of the seat
+    // closest to its lead).
+    //
+    // WITH HOOKS OFF there is no fast-attach, so this scan is the ONLY discovery
+    // path for tmux teammates and must keep adopting them (they self-identify
+    // from their record tags afterwards). Hence the hooksEnabledRef gate.
+    //
+    // Skip only when the lead is actually tracked; an orphan team session still
+    // falls through to normal adoption.
+    const teamMeta = hooksEnabledRef?.current
+      ? teamProvider?.getTeamMetadataForSession(file)
+      : null;
+    if (teamMeta?.teamName && teamMeta.agentName) {
+      let leadTracked = false;
+      for (const agent of agents.values()) {
+        if (agent.teamName === teamMeta.teamName && agent.leadAgentId === undefined) {
+          leadTracked = true;
+          break;
+        }
+      }
+      if (leadTracked) continue;
+    }
 
     // Only adopt recently-active files (modified within threshold).
     try {

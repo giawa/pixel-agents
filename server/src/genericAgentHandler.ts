@@ -15,6 +15,7 @@
 import type { GenericAgentEvent } from '../../core/src/genericAgent.js';
 import type { AgentRuntime } from './agentRuntime.js';
 import type { AgentStateStore } from './agentStateStore.js';
+import { DEFAULT_MAX_CONTEXT_TOKENS } from './constants.js';
 import { assignPaletteIfNeeded } from './paletteAssigner.js';
 import { cancelPermissionTimer, cancelWaitingTimer } from './timerManager.js';
 import type { AgentState } from './types.js';
@@ -104,8 +105,8 @@ export class GenericAgentHandler {
       linesProcessed: 0,
       seenUnknownRecordTypes: new Set(),
       folderName: event.agentName,
-      inputTokens: 0,
-      outputTokens: 0,
+      contextTokens: 0,
+      maxContextTokens: DEFAULT_MAX_CONTEXT_TOKENS,
       palette: event.palette,
       hueShift: event.hueShift,
     };

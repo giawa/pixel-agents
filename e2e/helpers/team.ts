@@ -110,6 +110,29 @@ export function buildUserToolResultBatchRecord(
   };
 }
 
+/** Agent tool_result as newer harnesses write it: the spawn resolves in seconds
+ *  with the spawned agent's identity (`agent_id: <name>@<team>`) while the agent
+ *  runs on as an independent top-level session. This result line is the only
+ *  lead-side team signal — the lead's own records carry no team tags. */
+export function buildTeammateSpawnResultRecord(
+  toolUseId: string,
+  teammateName: string,
+  teamName: string,
+): Record<string, unknown> {
+  return buildUserToolResultRecord(toolUseId, [
+    {
+      type: 'text',
+      text: `Spawned successfully.\nagent_id: ${teammateName}@${teamName}\nname: ${teammateName}`,
+    },
+  ]);
+}
+
+/** Setting record that opens new-harness teammate transcripts. Carries no team
+ *  tags — those appear only on later user/assistant records. */
+export function buildAgentSettingRecord(agentType = 'general-purpose'): Record<string, unknown> {
+  return { type: 'agent-setting', agentSetting: agentType };
+}
+
 export function buildAsyncAgentLaunchResultRecord(toolUseId: string): Record<string, unknown> {
   return buildUserToolResultRecord(toolUseId, [
     {
@@ -124,6 +147,28 @@ export function buildBackgroundAgentDoneRecord(toolUseId: string): Record<string
     type: 'queue-operation',
     operation: 'enqueue',
     content: `<tool-use-id>${toolUseId}</tool-use-id>`,
+  };
+}
+
+/**
+ * Assistant record that carries only token usage — the signal behind the
+ * context gauge. Real turns put almost the whole context in the cache
+ * counters (`input_tokens` is single digits once caching kicks in), so the
+ * cache read alone is the context size, which keeps expected percentages exact.
+ */
+export function buildAssistantUsageRecord(cacheReadTokens: number): Record<string, unknown> {
+  return {
+    type: 'assistant',
+    message: {
+      model: 'claude-opus-5',
+      content: [{ type: 'text', text: 'still working' }],
+      usage: {
+        input_tokens: 0,
+        cache_creation_input_tokens: 0,
+        cache_read_input_tokens: cacheReadTokens,
+        output_tokens: 0,
+      },
+    },
   };
 }
 

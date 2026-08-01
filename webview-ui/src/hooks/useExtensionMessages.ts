@@ -2,6 +2,8 @@ import { useEffect, useRef, useState } from 'react';
 
 import { CLIENT_SETTING_KEYS, resolveClientSetting } from '../clientSettings.js';
 import { playDoneSound, playPermissionSound, setSoundEnabled } from '../notificationSound.js';
+import type { ExistingAgentMeta, PendingAgent } from '../office/engine/existingAgents.js';
+import { reconcileExistingAgents } from '../office/engine/existingAgents.js';
 import type { OfficeState } from '../office/engine/officeState.js';
 import { setFloorSprites } from '../office/floorTiles.js';
 import { buildDynamicCatalog } from '../office/layout/furnitureCatalog.js';
@@ -133,15 +135,15 @@ export function useExtensionMessages(
   // Track whether initial layout has been loaded (ref to avoid re-render)
   const layoutReadyRef = useRef(false);
 
+  // Live background spawn tools per agent (runInBackground agentToolStart, or a
+  // lazily-created watched sub). Their sub-characters outlive the parent's turn:
+  // agentToolsClear must NOT remove them — despawning and re-creating moved the
+  // character to a new tile every turn. Cleared by subagentClear/agentClosed.
+  const backgroundParentToolIdsRef = useRef<Record<number, Set<string>>>({});
+
   useEffect(() => {
     // Buffer agents from existingAgents until layout is loaded
-    let pendingAgents: Array<{
-      id: number;
-      palette?: number;
-      hueShift?: number;
-      seatId?: string;
-      folderName?: string;
-    }> = [];
+    let pendingAgents: PendingAgent[] = [];
 
     // Accumulate distinct folderNames seen across agents (never removed during the
     // session): the source for the Areas folder-mapping dropdown, so a folder stays
@@ -226,10 +228,19 @@ export function useExtensionMessages(
         if (isTeammate && teammateParentId !== undefined) {
           // Teammate: inherit parent's palette and workspace folderName (teammate runs
           // in the same workspace as the lead). Name shown via agentName (teamRoleLabel).
+          // Seat them at the free seat closest to the lead so the team clusters.
           const parentCh = os.characters.get(teammateParentId);
           const palette = parentCh ? parentCh.palette : undefined;
           const hueShift = parentCh ? parentCh.hueShift : undefined;
-          os.addAgent(id, palette, hueShift, undefined, undefined, parentCh?.folderName);
+          os.addAgent(
+            id,
+            palette,
+            hueShift,
+            undefined,
+            undefined,
+            parentCh?.folderName,
+            teammateParentId,
+          );
           noteFolderName(parentCh?.folderName);
           // Set team metadata on the character
           const ch = os.characters.get(id);
@@ -268,27 +279,32 @@ export function useExtensionMessages(
           return next;
         });
         // Remove all sub-agent characters belonging to this agent
+        delete backgroundParentToolIdsRef.current[id];
         os.removeAllSubagents(id);
         setSubagentCharacters((prev) => prev.filter((s) => s.parentAgentId !== id));
         os.removeAgent(id);
       } else if (msg.type === 'existingAgents') {
         const incoming = msg.agents as number[];
-        const meta = (msg.agentMeta || {}) as Record<
-          number,
-          { palette?: number; hueShift?: number; seatId?: string }
-        >;
+        const meta = (msg.agentMeta || {}) as Record<number, ExistingAgentMeta>;
         const folderNames = (msg.folderNames || {}) as Record<number, string>;
-        // Buffer agents — they'll be added in layoutLoaded after seats are built
         for (const id of incoming) {
-          const m = meta[id];
-          pendingAgents.push({
-            id,
-            palette: m?.palette,
-            hueShift: m?.hueShift,
-            seatId: m?.seatId,
-            folderName: folderNames[id],
-          });
           noteFolderName(folderNames[id]);
+        }
+        // Order-independent restore: add agents now if the layout (and its seats)
+        // is already built, otherwise buffer them for the next layoutLoaded.
+        // Depending on layoutLoaded always arriving last stranded restored agents
+        // on surfaces that send layout first (issue #334).
+        if (
+          reconcileExistingAgents(
+            os,
+            incoming,
+            meta,
+            folderNames,
+            layoutReadyRef.current,
+            pendingAgents,
+          )
+        ) {
+          saveAgentSeats(os);
         }
         setAgents((prev) => {
           const ids = new Set(prev);
@@ -332,9 +348,20 @@ export function useExtensionMessages(
         //   - parent has NO teamName: no teammate path exists, so we must still
         //     create the Subtask sub-character or the background task is invisible.
         const runInBackground = msg.runInBackground as boolean | undefined;
+        if (runInBackground) {
+          const set = (backgroundParentToolIdsRef.current[id] ??= new Set());
+          set.add(toolId);
+        }
+        // Named spawns are Teammates-to-be: a teammate character will represent
+        // them, so never create the Subtask ghost the teammate would replace.
+        const isTeammateSpawn = msg.isTeammateSpawn as boolean | undefined;
         const parentChar = os.characters.get(id);
         const parentHasTeam = !!parentChar?.teamName;
-        if (isSubagentToolName(toolName) && (!runInBackground || !parentHasTeam)) {
+        if (
+          isSubagentToolName(toolName) &&
+          !isTeammateSpawn &&
+          (!runInBackground || !parentHasTeam)
+        ) {
           const label = status.startsWith('Subtask:') ? status.slice('Subtask:'.length).trim() : '';
           const subId = os.addSubagent(id, toolId);
           setSubagentCharacters((prev) => {
@@ -355,27 +382,51 @@ export function useExtensionMessages(
         });
       } else if (msg.type === 'agentToolsClear') {
         const id = msg.id as number;
+        const bgSet = backgroundParentToolIdsRef.current[id];
         setAgentTools((prev) => {
           if (!(id in prev)) return prev;
           const next = { ...prev };
           delete next[id];
           return next;
         });
+        // Keep sub-tool rows of live background spawns: their sub-characters
+        // survive the parent's turn end and stay animated by their own activity.
         setSubagentTools((prev) => {
-          if (!(id in prev)) return prev;
+          const agentSubs = prev[id];
+          if (!agentSubs) return prev;
+          const kept: Record<string, ToolActivity[]> = {};
+          for (const [parentToolId, rows] of Object.entries(agentSubs)) {
+            if (bgSet?.has(parentToolId)) kept[parentToolId] = rows;
+          }
           const next = { ...prev };
-          delete next[id];
+          if (Object.keys(kept).length === 0) {
+            delete next[id];
+          } else {
+            next[id] = kept;
+          }
           return next;
         });
-        // Remove all sub-agent characters belonging to this agent.
-        // Exception: team leads with inline teammates -- their sub-agents represent
-        // real teammates and should only be removed by SubagentStop/subagentClear.
+        // Remove this agent's sub-agent characters, EXCEPT:
+        // - team leads with inline teammates: their sub-agents represent real
+        //   teammates, removed only by SubagentStop/subagentClear;
+        // - live background spawns: removing + re-creating them on every turn
+        //   end teleported the character (subagentClear removes them for real).
         const clearCh = os.characters.get(id);
         const hasInlineTeammates =
           clearCh?.teamName && clearCh?.isTeamLead && !clearCh?.teamUsesTmux;
         if (!hasInlineTeammates) {
-          os.removeAllSubagents(id);
-          setSubagentCharacters((prev) => prev.filter((s) => s.parentAgentId !== id));
+          const doomed: string[] = [];
+          for (const meta of os.subagentMeta.values()) {
+            if (meta.parentAgentId === id && !bgSet?.has(meta.parentToolId)) {
+              doomed.push(meta.parentToolId);
+            }
+          }
+          for (const parentToolId of doomed) {
+            os.removeSubagent(id, parentToolId);
+          }
+          setSubagentCharacters((prev) =>
+            prev.filter((s) => s.parentAgentId !== id || bgSet?.has(s.parentToolId)),
+          );
         }
         os.setAgentTool(id, null);
         os.clearPermissionBubble(id);
@@ -452,15 +503,27 @@ export function useExtensionMessages(
             [id]: { ...agentSubs, [parentToolId]: [...list, { toolId, status, done: false }] },
           };
         });
-        // Update sub-agent character's tool and active state. The sub-agent was
-        // created by an earlier agentToolStart from JSONL using the same (real)
-        // parentToolId, so this lookup resolves.
-        const subId = os.getSubagentId(id, parentToolId);
-        if (subId !== null) {
-          const subToolName = extractToolName(status);
-          os.setAgentTool(subId, subToolName);
-          os.setAgentActive(subId, true);
+        // Update sub-agent character's tool and active state. The sub-agent is
+        // usually created by an earlier agentToolStart from JSONL using the same
+        // (real) parentToolId. When it's missing — a teamed lead's background
+        // spawn (the creation gate above suppressed the Subtask) or a reloaded
+        // panel that lost it — create it lazily; addSubagent is idempotent.
+        let subId = os.getSubagentId(id, parentToolId);
+        if (subId === null) {
+          subId = os.addSubagent(id, parentToolId);
+          const newSubId = subId;
+          setSubagentCharacters((prev) => {
+            if (prev.some((s) => s.id === newSubId)) return prev;
+            return [...prev, { id: newSubId, parentAgentId: id, parentToolId, label: '' }];
+          });
+          // Only watched background spawns are created lazily -- mark the
+          // parent tool as background so agentToolsClear preserves the sub.
+          const set = (backgroundParentToolIdsRef.current[id] ??= new Set());
+          set.add(parentToolId);
         }
+        const subToolName = extractToolName(status);
+        os.setAgentTool(subId, subToolName);
+        os.setAgentActive(subId, true);
       } else if (msg.type === 'subagentToolDone') {
         const id = msg.id as number;
         const parentToolId = msg.parentToolId as string;
@@ -481,6 +544,7 @@ export function useExtensionMessages(
       } else if (msg.type === 'subagentClear') {
         const id = msg.id as number;
         const parentToolId = msg.parentToolId as string;
+        backgroundParentToolIdsRef.current[id]?.delete(parentToolId);
         setSubagentTools((prev) => {
           const agentSubs = prev[id];
           if (!agentSubs || !(parentToolId in agentSubs)) return prev;
@@ -631,9 +695,9 @@ export function useExtensionMessages(
           msg.leadAgentId as number | undefined,
           msg.teamUsesTmux as boolean | undefined,
         );
-      } else if (msg.type === 'agentTokenUsage') {
+      } else if (msg.type === 'agentContextUsage') {
         const id = msg.id as number;
-        os.setAgentTokens(id, msg.inputTokens as number, msg.outputTokens as number);
+        os.setAgentContext(id, msg.contextTokens as number, msg.maxContextTokens as number);
       }
     };
     const unsubscribe = transport.onMessage(handler);
@@ -641,6 +705,21 @@ export function useExtensionMessages(
     return unsubscribe;
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [getOfficeState]);
+
+  // Idle sub-agent characters between their turns: when every tracked tool row
+  // for a sub is done, stop its typing animation (a later subagentToolStart
+  // reactivates it). Watched background sub-agents get a synthesized done for
+  // each live tool at their turn end, so they sit idle instead of typing forever.
+  useEffect(() => {
+    const os = getOfficeState();
+    for (const sub of subagentCharacters) {
+      const rows = subagentTools[sub.parentAgentId]?.[sub.parentToolId];
+      if (rows && rows.length > 0 && rows.every((t) => t.done)) {
+        os.setAgentTool(sub.id, null);
+        os.setAgentActive(sub.id, false);
+      }
+    }
+  }, [subagentTools, subagentCharacters, getOfficeState]);
 
   return {
     agents,

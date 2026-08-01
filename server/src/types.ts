@@ -47,23 +47,43 @@ export interface AgentState {
    *  the PostToolUse-before-SubagentStart race); overwritten on the next PreToolUse. */
   currentHookIsTeammateSpawn?: boolean;
 
-  // -- Token tracking --
-  inputTokens: number;
-  outputTokens: number;
+  // -- Context window usage (server/src/contextUsage.ts) --
+  /** Tokens in the agent's context as of its newest turn; 0 until one is seen.
+   *  A snapshot, not a running total -- it falls on compaction and /clear. */
+  contextTokens: number;
+  /** Observational estimate of the window `contextTokens` fits in. Widens as
+   *  larger contexts appear, never shrinks. */
+  maxContextTokens: number;
+  /** True once this transcript produced a main-chain turn, after which
+   *  sidechain records belong to sub-agents and stop moving the gauge. */
+  sawMainChainUsage?: boolean;
 
   // -- Agent Teams --
   teamName?: string;
   agentName?: string;
+  /** True when teamName was read from the session's own record tags (tmux/
+   *  inline teams, teammate sessions). Tag identity is authoritative: spawn-
+   *  result re-latching (implicit-team generations on resume) only applies to
+   *  tag-less leads. Transient — not persisted. */
+  teamNameFromTags?: boolean;
   isTeamLead?: boolean;
   leadAgentId?: number;
   /** True when lead spawns teammates via tmux (run_in_background Agent calls) */
   teamUsesTmux?: boolean;
-
   // -- Avatar customization --
   /** Preferred character palette (0-5). If undefined, auto-assigned for diversity. */
   palette?: number;
   /** Hue shift in degrees (0-360). Rotates the base palette colors. */
   hueShift?: number;
+  /** For a promoted anonymous background agent (teams OFF): the lead's Agent
+   *  tool_use id that spawned it. Links this character to the lead's
+   *  backgroundAgentToolIds entry so the queue-operation completion removes it. */
+  spawnToolUseId?: string;
+  /** Tool ids of spawn calls whose input carried a `name` — teammates-to-be.
+   *  Every agentToolStart (re-)broadcast for these carries isTeammateSpawn so
+   *  the webview never creates a Subtask ghost for them. Transient, lazily
+   *  created, never persisted. */
+  teammateSpawnToolIds?: Set<string>;
 }
 
 export interface PersistedAgent {
@@ -84,4 +104,8 @@ export interface PersistedAgent {
   isTeamLead?: boolean;
   leadAgentId?: number;
   teamUsesTmux?: boolean;
+  /** Live background-spawn tool ids on a lead. Persisted so the spawns'
+   *  transcripts are re-adopted after a reload; the spawned children
+   *  themselves are derived state and never persisted. */
+  backgroundAgentToolIds?: string[];
 }

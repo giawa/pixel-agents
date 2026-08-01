@@ -24,7 +24,7 @@ export type ServerMessage =
   | SubagentClear
   | SubagentToolPermission
   | AgentTeamInfo
-  | AgentTokenUsage
+  | AgentContextUsage
   | LayoutLoaded
   | FurnitureAssetsLoaded
   | CharacterSpritesLoaded
@@ -114,6 +114,7 @@ export interface AgentToolStart {
   toolName?: string;
   permissionActive?: boolean;
   runInBackground?: boolean;
+  isTeammateSpawn?: boolean;
 }
 
 export interface AgentToolDone {
@@ -174,11 +175,11 @@ export interface AgentTeamInfo {
   teamUsesTmux?: boolean;
 }
 
-export interface AgentTokenUsage {
-  type: 'agentTokenUsage';
+export interface AgentContextUsage {
+  type: 'agentContextUsage';
   id: number;
-  inputTokens: number;
-  outputTokens: number;
+  contextTokens: number;
+  maxContextTokens: number;
 }
 
 export interface LayoutLoaded {
