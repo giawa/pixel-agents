@@ -83,6 +83,8 @@ function App() {
     watchAllSessions,
     setWatchAllSessions,
     alwaysShowLabels,
+    ghostHeadlessAgents,
+    setGhostHeadlessAgents,
     hooksEnabled,
     setHooksEnabled,
     hooksInfoShown,
@@ -140,6 +142,14 @@ function App() {
       return newVal;
     });
   }, [readOnly]);
+
+  // Toggle "Display headless as ghosts". setGhostHeadlessAgents also updates the
+  // renderer's module copy, so the office redraws on the next frame.
+  const handleToggleGhostHeadlessAgents = useCallback(() => {
+    const next = !ghostHeadlessAgents;
+    setGhostHeadlessAgents(next);
+    transport.send({ type: 'setGhostHeadlessAgents', enabled: next });
+  }, [ghostHeadlessAgents, setGhostHeadlessAgents]);
 
   const handleSelectAgent = useCallback((id: number) => {
     transport.send({ type: 'focusAgent', id });
@@ -537,6 +547,8 @@ function App() {
         onToggleDebugMode={handleToggleDebugMode}
         alwaysShowOverlay={alwaysShowOverlay}
         onToggleAlwaysShowOverlay={handleToggleAlwaysShowOverlay}
+        ghostHeadlessAgents={ghostHeadlessAgents}
+        onToggleGhostHeadlessAgents={handleToggleGhostHeadlessAgents}
         externalAssetDirectories={externalAssetDirectories}
         watchAllSessions={watchAllSessions}
         onToggleWatchAllSessions={() => {

@@ -140,6 +140,7 @@ components:
         - $ref: '#/components/schemas/SetSoundEnabled'
         - $ref: '#/components/schemas/SetLastSeenVersion'
         - $ref: '#/components/schemas/SetAlwaysShowLabels'
+        - $ref: '#/components/schemas/SetGhostHeadlessAgents'
         - $ref: '#/components/schemas/SetHooksEnabled'
         - $ref: '#/components/schemas/SetHooksInfoShown'
         - $ref: '#/components/schemas/SetWatchAllSessions'
@@ -640,6 +641,7 @@ components:
         - extensionVersion
         - watchAllSessions
         - alwaysShowLabels
+        - ghostHeadlessAgents
         - hooksEnabled
         - hooksInfoShown
         - externalAssetDirectories
@@ -656,6 +658,8 @@ components:
         watchAllSessions:
           type: boolean
         alwaysShowLabels:
+          type: boolean
+        ghostHeadlessAgents:
           type: boolean
         hooksEnabled:
           type: boolean
@@ -829,6 +833,19 @@ components:
       properties:
         type:
           const: setAlwaysShowLabels
+        enabled:
+          type: boolean
+
+    SetGhostHeadlessAgents:
+      description: >-
+        Toggle translucent rendering for headless agents (adopted sessions with no
+        terminal to focus).
+      type: object
+      additionalProperties: false
+      required: [type, enabled]
+      properties:
+        type:
+          const: setGhostHeadlessAgents
         enabled:
           type: boolean
 
