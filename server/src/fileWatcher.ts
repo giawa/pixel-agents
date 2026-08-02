@@ -750,7 +750,12 @@ export function scanForTeammateFiles(
       teamUsesTmux: parentAgent?.teamUsesTmux,
     };
 
-    assignPaletteIfNeeded(agent, agents);
+    if (parentAgent?.palette !== undefined) {
+      agent.palette = parentAgent.palette;
+      agent.hueShift = parentAgent.hueShift ?? 0;
+    } else {
+      assignPaletteIfNeeded(agent, agents);
+    }
     agents.set(id, agent);
     persistAgents();
 
@@ -901,7 +906,12 @@ export function scanForBackgroundAgentFiles(
       spawnToolUseId: entry.toolUseId,
     };
 
-    assignPaletteIfNeeded(agent, agents);
+    if (lead.palette !== undefined) {
+      agent.palette = lead.palette;
+      agent.hueShift = lead.hueShift ?? 0;
+    } else {
+      assignPaletteIfNeeded(agent, agents);
+    }
     agents.set(id, agent);
 
     // Derived team: spawning a named agent makes the spawner a Lead, whether
