@@ -33,7 +33,6 @@ import {
   watchLayoutFile,
   writeLayoutToFile,
 } from '../../server/src/layoutPersistence.js';
-import { setPaletteCount } from '../../server/src/paletteAssigner.js';
 import { PathSet } from '../../server/src/pathKey.js';
 import { claudeProvider, copyHookScript } from '../../server/src/providers/index.js';
 import { PixelAgentsServer } from '../../server/src/server.js';
@@ -557,7 +556,6 @@ export class PixelAgentsViewProvider implements vscode.WebviewViewProvider {
             // Load character sprites (bundled + external)
             const charSprites = await this.loadAllCharacterSprites();
             if (charSprites && this.webview) {
-              setPaletteCount(charSprites.characters.length);
               console.log(
                 `[Extension] ${charSprites.characters.length} character sprites loaded, sending to webview`,
               );
@@ -792,7 +790,6 @@ export class PixelAgentsViewProvider implements vscode.WebviewViewProvider {
     try {
       const chars = await this.loadAllCharacterSprites();
       if (chars) {
-        setPaletteCount(chars.characters.length);
         sendCharacterSpritesToWebview(this.webview, chars);
       }
     } catch (err) {

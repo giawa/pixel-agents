@@ -22,7 +22,6 @@ import type { AssetCache, ReloadAssetsSideEffect } from './clientMessageHandler.
 import { readConfig } from './configPersistence.js';
 import { MAX_PORT, MIN_PORT } from './constants.js';
 import { FileStateAdapter } from './fileStateAdapter.js';
-import { setPaletteCount } from './paletteAssigner.js';
 import { claudeProvider, copyHookScript } from './providers/index.js';
 import { PixelAgentsServer } from './server.js';
 
@@ -100,7 +99,6 @@ async function main(): Promise<void> {
     readConfig().externalAssetDirectories,
   );
   const charCount = assetCache.characters?.characters.length ?? 0;
-  if (charCount > 0) setPaletteCount(charCount);
   const petCount = assetCache.pets?.pets.length ?? 0;
   const furnitureCount = assetCache.furniture?.catalog.length ?? 0;
   console.log(
@@ -164,7 +162,6 @@ async function main(): Promise<void> {
       assetCache.pets = pets;
       assetCache.furniture = furniture;
       if (characters) {
-        setPaletteCount(characters.characters.length);
         send({ type: 'characterSpritesLoaded', characters: characters.characters });
       }
       if (pets) {
