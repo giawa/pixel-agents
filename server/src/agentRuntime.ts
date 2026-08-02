@@ -515,6 +515,8 @@ export class AgentRuntime {
         isTeamLead: p.isTeamLead,
         leadAgentId: p.leadAgentId,
         teamUsesTmux: p.teamUsesTmux,
+        palette: p.palette,
+        hueShift: p.hueShift,
       };
 
       assignPaletteIfNeeded(agent, this.store);

@@ -10,8 +10,8 @@ export interface PalettePick {
   hueShift: number;
 }
 
-export const HUE_SHIFT_MIN_DEG = 45;
-export const HUE_SHIFT_RANGE_DEG = 271;
+const HUE_SHIFT_MIN_DEG = 45;
+const HUE_SHIFT_RANGE_DEG = 271;
 
 /**
  * Pick a diverse palette based on current palette distribution.

@@ -108,4 +108,9 @@ export interface PersistedAgent {
    *  transcripts are re-adopted after a reload; the spawned children
    *  themselves are derived state and never persisted. */
   backgroundAgentToolIds?: string[];
+  /** Preferred character palette (0-5). Persisted so colors stay stable
+   *  across server restarts; assignPaletteIfNeeded is a no-op on restore. */
+  palette?: number;
+  /** Hue shift in degrees (0-360). Persisted alongside palette. */
+  hueShift?: number;
 }

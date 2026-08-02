@@ -3,6 +3,7 @@ import type { AgentRuntime } from './agentRuntime.js';
 import type { AgentStateStore } from './agentStateStore.js';
 import type { LoadedAssets, LoadedCharacterSprites, LoadedPetSprites } from './assetLoader.js';
 import { readConfig, writeConfig } from './configPersistence.js';
+import { HUE_SHIFT_MAX_DEG, PALETTE_COUNT } from './constants.js';
 import { readLayoutFromFile, writeLayoutToFile } from './layoutPersistence.js';
 import { claudeProvider } from './providers/index.js';
 
@@ -85,7 +86,7 @@ export function handleClientMessage(
   send: WsSend,
   ctx: ClientMessageContext,
 ): void {
-  const { store, runtime } = ctx;
+  const { store, runtime, cache } = ctx;
   const adapter = store.getAdapter();
   const isLocal = ctx.isLocal !== false;
 
@@ -130,13 +131,34 @@ export function handleClientMessage(
           string,
           { palette?: number; hueShift?: number; seatId?: string }
         >;
-        // Sync palette/hueShift back to AgentState so existingAgents stays consistent
+        // Sync palette/hueShift back to AgentState so existingAgents stays
+        // consistent across reconnects. Validate ranges to keep a remote
+        // client (or a hand-edited payload) from corrupting the stored
+        // values with out-of-range inputs that would render as a glitch.
+        // Palette ceiling is dynamic: external asset directories can add
+        // char_N.png beyond the bundled 6, so read the count from the asset
+        // cache instead of hardcoding PALETTE_COUNT.
+        const paletteCount = cache?.characters?.characters.length ?? PALETTE_COUNT;
         for (const [idStr, meta] of Object.entries(seats)) {
           const id = Number(idStr);
           const agent = store.get(id);
           if (agent) {
-            if (meta.palette !== undefined) agent.palette = meta.palette;
-            if (meta.hueShift !== undefined) agent.hueShift = meta.hueShift;
+            if (
+              meta.palette !== undefined &&
+              Number.isInteger(meta.palette) &&
+              meta.palette >= 0 &&
+              meta.palette < paletteCount
+            ) {
+              agent.palette = meta.palette;
+            }
+            if (
+              meta.hueShift !== undefined &&
+              Number.isInteger(meta.hueShift) &&
+              meta.hueShift >= 0 &&
+              meta.hueShift <= HUE_SHIFT_MAX_DEG
+            ) {
+              agent.hueShift = meta.hueShift;
+            }
           }
         }
         adapter?.saveSeats(seats);

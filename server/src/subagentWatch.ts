@@ -22,6 +22,7 @@ import type * as fs from 'fs';
 import { AgentStateStore } from './agentStateStore.js';
 import { DEFAULT_MAX_CONTEXT_TOKENS } from './constants.js';
 import { readNewLines, startFileWatching } from './fileWatcher.js';
+import { assignPaletteIfNeeded } from './paletteAssigner.js';
 import { pathsMatch } from './pathKey.js';
 import { cancelPermissionTimer, cancelWaitingTimer } from './timerManager.js';
 import type { AgentState } from './types.js';
@@ -98,6 +99,7 @@ export class SubagentWatch {
       spawnToolUseId: entry.toolUseId,
     };
 
+    assignPaletteIfNeeded(agent, this.store);
     this.subKeys.set(id, { leadId, spawnToolUseId: entry.toolUseId });
     this.store.set(id, agent);
 
