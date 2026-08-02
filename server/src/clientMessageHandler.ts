@@ -61,7 +61,7 @@ export function handleClientMessage(
   send: WsSend,
   ctx: ClientMessageContext,
 ): void {
-  const { store, runtime } = ctx;
+  const { store, runtime, cache } = ctx;
   const adapter = store.getAdapter();
 
   switch (msg.type) {
@@ -104,6 +104,10 @@ export function handleClientMessage(
         // consistent across reconnects. Validate ranges to keep a remote
         // client (or a hand-edited payload) from corrupting the stored
         // values with out-of-range inputs that would render as a glitch.
+        // Palette ceiling is dynamic: external asset directories can add
+        // char_N.png beyond the bundled 6, so read the count from the asset
+        // cache instead of hardcoding PALETTE_COUNT.
+        const paletteCount = cache?.characters?.characters.length ?? PALETTE_COUNT;
         for (const [idStr, meta] of Object.entries(seats)) {
           const id = Number(idStr);
           const agent = store.get(id);
@@ -112,7 +116,7 @@ export function handleClientMessage(
               meta.palette !== undefined &&
               Number.isInteger(meta.palette) &&
               meta.palette >= 0 &&
-              meta.palette < PALETTE_COUNT
+              meta.palette < paletteCount
             ) {
               agent.palette = meta.palette;
             }

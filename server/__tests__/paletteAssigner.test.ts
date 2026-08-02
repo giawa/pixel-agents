@@ -1,8 +1,8 @@
-import { beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import { AgentStateStore } from '../src/agentStateStore.js';
 import { HUE_SHIFT_MAX_DEG, PALETTE_COUNT } from '../src/constants.js';
-import { assignPaletteIfNeeded } from '../src/paletteAssigner.js';
+import { assignPaletteIfNeeded, setPaletteCount } from '../src/paletteAssigner.js';
 import type { AgentState } from '../src/types.js';
 
 function createTestAgent(overrides: Partial<AgentState> = {}): AgentState {
@@ -39,6 +39,11 @@ describe('paletteAssigner', () => {
 
   beforeEach(() => {
     store = new AgentStateStore();
+  });
+
+  afterEach(() => {
+    // Reset module-level count so tests don't leak into each other.
+    setPaletteCount(PALETTE_COUNT);
   });
 
   describe('assignPaletteIfNeeded', () => {
@@ -99,6 +104,24 @@ describe('paletteAssigner', () => {
         expect(a.palette).toBe(prev?.palette);
         expect(a.hueShift).toBe(prev?.hueShift);
       }
+    });
+  });
+
+  describe('setPaletteCount', () => {
+    it('picks from [0, N) when set above the default 6', () => {
+      setPaletteCount(8);
+      // Six agents get 0..5; the seventh must pick from [0, 8) -- if the
+      // count were still 6, it would re-pick 0..5 and never 6 or 7.
+      for (let i = 0; i < 6; i++) {
+        store.set(100 + i, createTestAgent({ id: 100 + i, palette: i, hueShift: 0 }));
+      }
+      // minCount across 0..5 is 1, and palettes 6,7 are at count 0 -- the
+      // least-used set is {6, 7}, so the pick must be 6 or 7.
+      const agent = createTestAgent({ id: 999 });
+      assignPaletteIfNeeded(agent, store);
+      expect(agent.palette).toBeGreaterThanOrEqual(6);
+      expect(agent.palette).toBeLessThan(8);
+      expect(agent.hueShift).toBe(0); // minCount === 0 for 6 and 7
     });
   });
 });

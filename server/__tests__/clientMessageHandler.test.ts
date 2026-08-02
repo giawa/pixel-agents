@@ -381,4 +381,52 @@ describe('clientMessageHandler: saveAgentSeats palette sync', () => {
 
     expect(store.get(999)).toBeUndefined();
   });
+
+  it('accepts palette 7 when the cache has 8 character sprites', () => {
+    // The guard reads ctx.cache?.characters?.characters.length instead
+    // of hardcoding PALETTE_COUNT. With 8 sprites, palette 7 is valid.
+    const cache: AssetCache = {
+      characters: {
+        characters: [
+          { down: [[[]]], up: [[[]]], right: [[[]]] },
+          { down: [[[]]], up: [[[]]], right: [[[]]] },
+          { down: [[[]]], up: [[[]]], right: [[[]]] },
+          { down: [[[]]], up: [[[]]], right: [[[]]] },
+          { down: [[[]]], up: [[[]]], right: [[[]]] },
+          { down: [[[]]], up: [[[]]], right: [[[]]] },
+          { down: [[[]]], up: [[[]]], right: [[[]]] },
+          { down: [[[]]], up: [[[]]], right: [[[]]] },
+        ],
+      },
+      pets: null,
+      floorTiles: null,
+      wallTiles: null,
+      carpetTiles: null,
+      furniture: null,
+      defaultLayout: null,
+    };
+    ctx = freshCtx(cache);
+    store.set(1, createTestAgent({ id: 1 }));
+
+    handleClientMessage(
+      {
+        type: 'saveAgentSeats',
+        seats: { '1': { palette: 7, hueShift: 90, seatId: null } },
+      },
+      (m) => sent.push(m),
+      ctx,
+    );
+
+    expect(store.get(1)?.palette).toBe(7);
+    // palette 8 is still out of range for 8 sprites → dropped.
+    handleClientMessage(
+      {
+        type: 'saveAgentSeats',
+        seats: { '1': { palette: 8, hueShift: 90, seatId: null } },
+      },
+      (m) => sent.push(m),
+      ctx,
+    );
+    expect(store.get(1)?.palette).toBe(7);
+  });
 });
