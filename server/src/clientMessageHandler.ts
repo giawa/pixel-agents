@@ -295,10 +295,43 @@ function handleWebviewReady(send: WsSend, ctx: ClientMessageContext): void {
   const savedLayout = readLayoutFromFile();
   send({ type: 'layoutLoaded', layout: savedLayout ?? cache?.defaultLayout ?? null });
 
-  // 8. Context gauges, AFTER layoutLoaded -- the characters they target only
+  // 8. Agent state, AFTER layoutLoaded -- the characters they target only
   // exist once the layout flush creates them. Without this a reconnecting
   // client shows bare characters until each agent takes another turn.
   for (const [id, agent] of store) {
+    // Re-send active tools
+    for (const [toolId, status] of agent.activeToolStatuses) {
+      const toolName = agent.activeToolNames.get(toolId) ?? '';
+      send({
+        type: 'agentToolStart',
+        id,
+        toolId,
+        status,
+        toolName,
+      });
+    }
+    // Re-send waiting status
+    if (agent.isWaiting) {
+      send({
+        type: 'agentStatus',
+        id,
+        status: 'waiting',
+      });
+    }
+    // Re-send team metadata. Derived teams (named background spawns) have a
+    // name and a lead link but NO teamName, so gate on any team field.
+    if (agent.teamName || agent.agentName || agent.isTeamLead) {
+      send({
+        type: 'agentTeamInfo',
+        id,
+        teamName: agent.teamName,
+        agentName: agent.agentName,
+        isTeamLead: agent.isTeamLead,
+        leadAgentId: agent.leadAgentId,
+        teamUsesTmux: agent.teamUsesTmux,
+      });
+    }
+    // Re-send context usage
     if (agent.contextTokens > 0) {
       send({
         type: 'agentContextUsage',
