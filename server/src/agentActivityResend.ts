@@ -4,10 +4,6 @@ import { hasPromotedBackgroundAgent } from './teamUtils.js';
 /**
  * Replay an agent's active state to a connecting client.
  *
- * Extracted to prevent drift between the VS Code adapter (sendCurrentAgentStatuses)
- * and the standalone handler (handleWebviewReady). Both paths must send messages in
- * the same order with the same flags to avoid ghost Subtask characters on reconnect.
- *
  * Order matters:
  * 1. Team info first — webview needs team context before tool messages
  * 2. Regular tools
